@@ -2,6 +2,7 @@
 useHead({ title: 'Esqueci minha senha · Guilda' })
 const login = ref('')
 const sentTo = ref('')
+const code = ref('')
 const error = ref('')
 const busy = ref(false)
 const brand = ref<RememberedBrand | null>(null)
@@ -19,6 +20,24 @@ async function submit() {
   try {
     await api('/password-reset/request', { method: 'POST', body: { login: login.value } })
     sentTo.value = login.value.trim()
+    code.value = ''
+  } catch (e) {
+    error.value = apiErrorMessage(e)
+  } finally {
+    busy.value = false
+  }
+}
+// O código vale 10 minutos; com ele a pessoa segue para criar a senha nova.
+async function verify() {
+  error.value = ''
+  if (code.value.replace(/\D/g, '').length !== 6) {
+    error.value = 'O código tem 6 números.'
+    return
+  }
+  busy.value = true
+  try {
+    const { token } = await api<{ token: string }>('/password-reset/verify', { method: 'POST', body: { login: sentTo.value, code: code.value } })
+    await navigateTo(`/redefinir-senha/${token}`)
   } catch (e) {
     error.value = apiErrorMessage(e)
   } finally {
@@ -51,7 +70,7 @@ async function submit() {
           Esqueceu a senha?
         </h1>
         <p class="soft">
-          Sem problema. Te mandamos um link pelo WhatsApp para criar uma nova.
+          Sem problema. Te mandamos um código pelo WhatsApp para criar uma nova.
         </p>
         <label class="field">
           <span class="field__label">Seu celular</span>
@@ -72,7 +91,7 @@ async function submit() {
           class="btn"
           :disabled="busy"
         >
-          Enviar link pelo WhatsApp
+          Enviar código pelo WhatsApp
         </button>
         <NuxtLink
           to="/entrar"
@@ -82,11 +101,12 @@ async function submit() {
           Voltar para entrar
         </NuxtLink>
       </form>
-      <div
+      <form
         v-else
         class="stack-md"
         style="gap:14px"
-        role="status"
+        novalidate
+        @submit.prevent="verify"
       >
         <span
           style="width:64px;height:64px;border-radius:999px;background:#e3f3e8;color:var(--ok);display:grid;place-items:center;margin:0 auto"
@@ -96,19 +116,45 @@ async function submit() {
           style="width:28px;height:28px"
         /></span>
         <h1 style="font-size:26px;line-height:1.15;text-align:center">
-          Link enviado
+          Digite o código
         </h1>
         <p
           class="soft"
           style="text-align:center"
+          role="status"
         >
-          Se o <strong style="color:var(--ink)">{{ sentTo }}</strong> tiver conta e autorizou mensagens, o link chega no WhatsApp dele. O link vale por 30 minutos.
+          Se o <strong style="color:var(--ink)">{{ sentTo }}</strong> tiver conta e autorizou mensagens, chega um código de 6 números no WhatsApp. Ele vale por 10 minutos.
         </p>
+        <label class="field">
+          <span class="field__label">Código</span>
+          <input
+            v-model="code"
+            class="input input--lg"
+            inputmode="numeric"
+            autocomplete="one-time-code"
+            maxlength="7"
+            placeholder="000000"
+            style="letter-spacing:.3em;text-align:center;font-weight:800"
+          >
+        </label>
+        <p
+          v-if="error"
+          class="form-error"
+          role="alert"
+        >
+          {{ error }}
+        </p>
+        <button
+          class="btn"
+          :disabled="busy"
+        >
+          Continuar
+        </button>
         <p
           class="small muted"
           style="text-align:center"
         >
-          Não autorizou mensagens? Peça à coordenação para reenviar o seu acesso.
+          Não autorizou mensagens? Peça à coordenação para conferir seu cadastro.
         </p>
         <button
           type="button"
@@ -117,7 +163,7 @@ async function submit() {
           :disabled="busy"
           @click="submit"
         >
-          Não chegou? Enviar de novo
+          Não chegou? Enviar outro código
         </button>
         <NuxtLink
           to="/entrar"
@@ -126,7 +172,7 @@ async function submit() {
         >
           Voltar para entrar
         </NuxtLink>
-      </div>
+      </form>
     </div>
   </main>
 </template>

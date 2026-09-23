@@ -1,8 +1,9 @@
-import { and, eq, gt, isNull, ne, sql } from 'drizzle-orm'
+import { randomInt } from 'node:crypto'
+import { and, desc, eq, gt, isNull, ne, sql } from 'drizzle-orm'
 import { getConfig } from '../config'
 import type { Db, DbOrTx } from '../db/client'
 import { accounts, authTokens, churchLogos, churches, consents, people, sessions } from '../db/schema'
-import { burnPasswordCheck, hashPassword, randomToken, sha256, verifyPassword } from '../lib/crypto'
+import { burnPasswordCheck, hashPassword, randomToken, safeEqual, sha256, verifyPassword } from '../lib/crypto'
 import { AppError, badRequest, notFound, unauthorized } from '../lib/errors'
 import { normalizePhone } from '../lib/phone'
 import { firstName } from '../lib/text'
@@ -14,6 +15,8 @@ export type Account = typeof accounts.$inferSelect
 
 const INVITE_TTL_HOURS = 72
 const RESET_TTL_MINUTES = 30
+const CODE_TTL_MINUTES = 10
+const MAX_CODE_ATTEMPTS = 5
 const MAX_FAILED_LOGINS = 8
 const LOCK_MINUTES = 15
 
@@ -187,7 +190,9 @@ async function findValidToken(db: DbOrTx, token: string, purpose: 'invite' | 'pa
   const rows = forUpdate ? await q.for('update') : await q
   const row = rows[0]
   if (!row || row.usedAt || row.revokedAt || row.expiresAt <= new Date()) {
-    throw new AppError(410, 'token_invalid', 'Este link expirou ou já foi usado. Peça um novo à coordenação.')
+    throw new AppError(410, 'token_invalid', purpose === 'invite'
+      ? 'Este link expirou ou já foi usado. Peça um novo à coordenação.'
+      : 'Este passo expirou (30 minutos) ou já foi usado. Peça um novo código em "Esqueci minha senha".')
   }
   return row
 }
@@ -255,7 +260,8 @@ export async function acceptInvite(db: Db, input: { token: string, password: str
 // Recuperação de acesso
 // ---------------------------------------------------------------------------
 
-// Pedido feito pela própria pessoa. A resposta é sempre a mesma, exista ou não a conta.
+// Pedido feito pela própria pessoa: envia um código de 6 dígitos pelo WhatsApp (modelo de
+// autenticação da Meta). A resposta é sempre a mesma, exista ou não a conta.
 export async function requestPasswordReset(db: Db, loginInput: string) {
   const loginKey = normalizeLogin(loginInput)
   const account = await db.query.accounts.findFirst({ where: eq(accounts.login, loginKey) })
@@ -268,53 +274,87 @@ export async function requestPasswordReset(db: Db, loginInput: string) {
     .limit(1)
   const target = membership[0]
   if (!target) return
-  // No máximo um pedido a cada 5 minutos por conta.
+  // No máximo um código a cada 2 minutos por conta.
   const recent = await db.select({ n: sql<number>`count(*)::int` }).from(authTokens).where(and(
-    eq(authTokens.accountId, account.id), eq(authTokens.purpose, 'password_reset'),
-    gt(authTokens.createdAt, new Date(Date.now() - 5 * 60_000)),
+    eq(authTokens.accountId, account.id), eq(authTokens.purpose, 'password_code'),
+    gt(authTokens.createdAt, new Date(Date.now() - 2 * 60_000)),
   ))
   if ((recent[0]?.n ?? 0) > 0) return
-  await issuePasswordReset(db, account, target.person, target.church, null)
+  await db.transaction(async (tx) => {
+    // Só vale o último código enviado.
+    await tx.update(authTokens).set({ revokedAt: new Date() }).where(and(
+      eq(authTokens.accountId, account.id), eq(authTokens.purpose, 'password_code'), isNull(authTokens.usedAt), isNull(authTokens.revokedAt),
+    ))
+    const code = String(randomInt(0, 1_000_000)).padStart(6, '0')
+    const [row] = await tx.insert(authTokens).values({
+      purpose: 'password_code',
+      tokenHash: codeHash(account.id, code, randomToken(8)),
+      accountId: account.id,
+      churchId: target.church.id,
+      personId: target.person.id,
+      expiresAt: new Date(Date.now() + CODE_TTL_MINUTES * 60_000),
+    }).returning()
+    await enqueueMessage(tx, {
+      churchId: target.church.id,
+      personId: target.person.id,
+      kind: 'password_reset',
+      idempotencyKey: `reset-code:${row!.id}`,
+      params: [code],
+    })
+    await audit(tx, { churchId: target.church.id, actorAccountId: null, action: 'password_reset.issued', entityType: 'account', entityId: account.id })
+  })
 }
 
-// A coordenação pode reenviar o acesso de quem já tem conta.
+// O hash guarda um sal próprio ("sal:hash") porque códigos de 6 dígitos se repetem entre contas.
+function codeHash(accountId: string, code: string, salt: string) {
+  return `${salt}:${sha256(`${accountId}:${salt}:${code}`)}`
+}
+
+// Confere o código e devolve um token de uso único para criar a senha nova (tela
+// /redefinir-senha/:token). Erro sempre genérico; 5 tentativas erradas revogam o código.
+export async function verifyResetCode(db: Db, loginInput: string, code: string) {
+  const invalid = new AppError(400, 'invalid_code', 'Código incorreto ou expirado. Confira o WhatsApp ou peça um novo.')
+  const clean = code.replace(/\D/g, '')
+  if (clean.length !== 6) throw invalid
+  const account = await db.query.accounts.findFirst({ where: eq(accounts.login, normalizeLogin(loginInput)) })
+  if (!account) throw invalid
+  // A tentativa errada precisa ficar gravada: o erro só é lançado depois do commit.
+  const result = await db.transaction(async (tx) => {
+    const row = (await tx.select().from(authTokens).where(and(
+      eq(authTokens.accountId, account.id), eq(authTokens.purpose, 'password_code'),
+      isNull(authTokens.usedAt), isNull(authTokens.revokedAt), gt(authTokens.expiresAt, new Date()),
+    )).orderBy(desc(authTokens.createdAt)).limit(1).for('update'))[0]
+    if (!row) return null
+    const salt = row.tokenHash.split(':')[0]!
+    if (!safeEqual(row.tokenHash, codeHash(account.id, clean, salt))) {
+      const attempts = row.attempts + 1
+      await tx.update(authTokens).set({ attempts, ...(attempts >= MAX_CODE_ATTEMPTS ? { revokedAt: new Date() } : {}) }).where(eq(authTokens.id, row.id))
+      return null
+    }
+    await tx.update(authTokens).set({ usedAt: new Date() }).where(eq(authTokens.id, row.id))
+    const token = randomToken(32)
+    await tx.insert(authTokens).values({
+      purpose: 'password_reset',
+      tokenHash: sha256(token),
+      accountId: account.id,
+      churchId: row.churchId,
+      personId: row.personId,
+      expiresAt: new Date(Date.now() + RESET_TTL_MINUTES * 60_000),
+    })
+    return { token }
+  })
+  if (!result) throw invalid
+  return result
+}
+
+// A coordenação reenvia o convite de quem ainda não tem conta. Quem já tem conta recupera
+// a senha sozinho (código no próprio WhatsApp): a coordenação não pode trocar a senha de ninguém.
 export async function coordinatorResendAccess(db: Db, ctx: ChurchContext, personId: string) {
   requireCoordinator(ctx)
   const person = await db.query.people.findFirst({ where: and(eq(people.churchId, ctx.church.id), eq(people.id, personId)) })
   if (!person) throw notFound('Pessoa')
-  if (!person.accountId) return createInvite(db, ctx, personId)
-  const account = await db.query.accounts.findFirst({ where: eq(accounts.id, person.accountId) })
-  if (!account) throw notFound('Conta')
-  const result = await issuePasswordReset(db, account, person, ctx.church, ctx.accountId)
-  return { inviteId: null, ...result }
-}
-
-async function issuePasswordReset(db: Db, account: Account, person: typeof people.$inferSelect, church: typeof churches.$inferSelect, createdBy: string | null) {
-  return db.transaction(async (tx) => {
-    await tx.update(authTokens).set({ revokedAt: new Date() }).where(and(
-      eq(authTokens.accountId, account.id), eq(authTokens.purpose, 'password_reset'), isNull(authTokens.usedAt), isNull(authTokens.revokedAt),
-    ))
-    const token = randomToken(32)
-    const expiresAt = new Date(Date.now() + RESET_TTL_MINUTES * 60_000)
-    const [row] = await tx.insert(authTokens).values({
-      purpose: 'password_reset',
-      tokenHash: sha256(token),
-      accountId: account.id,
-      churchId: church.id,
-      personId: person.id,
-      createdByAccountId: createdBy,
-      expiresAt,
-    }).returning()
-    const message = await enqueueMessage(tx, {
-      churchId: church.id,
-      personId: person.id,
-      kind: 'password_reset',
-      idempotencyKey: `reset:${row!.id}`,
-      params: [firstName(person.displayName), church.name, `${getConfig().appBaseUrl}/redefinir-senha/${token}`],
-    })
-    await audit(tx, { churchId: church.id, actorAccountId: createdBy, action: 'password_reset.issued', entityType: 'account', entityId: account.id })
-    return { expiresAt, messageId: message.id, messageStatus: message.status, blockedReason: message.blockedReason }
-  })
+  if (person.accountId) throw badRequest('has_account', `${firstName(person.displayName)} já tem conta. Se esqueceu a senha, é só tocar em "Esqueci minha senha" na tela de entrar.`)
+  return createInvite(db, ctx, personId)
 }
 
 export async function resetPassword(db: Db, token: string, password: string, opts: { client?: 'web' | 'native', userAgent?: string | null } = {}) {

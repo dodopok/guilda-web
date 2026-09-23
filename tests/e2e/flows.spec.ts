@@ -1,4 +1,6 @@
 import { type Browser, expect, test } from '@playwright/test'
+import pg from 'pg'
+import { E2E_DB, e2eEnv } from './env'
 import { PHONES, editor, login, nextMonth } from './helpers'
 
 // Fluxos completos pela interface, na ordem real do trabalho da coordenação.
@@ -258,4 +260,36 @@ test('logo: JPG enviado em Configurações é lido, guardado e sugere cores', as
   expect(res.status()).toBe(200)
   expect(res.headers()['content-type']).toMatch(/image\/(webp|png)/)
   await coord.context().close()
+})
+
+test('esqueci minha senha: código pelo WhatsApp, nova senha e entrada direta', async ({ browser }) => {
+  const page = await (await browser.newContext({ locale: 'pt-BR' })).newPage()
+  await page.goto('/recuperar-senha')
+  await page.getByLabel('Seu celular').fill('51900000005')
+  await page.getByRole('button', { name: 'Enviar código pelo WhatsApp' }).click()
+  await expect(page.getByRole('heading', { name: 'Digite o código' })).toBeVisible()
+  // Em simulação o código só existe cifrado no banco (e no log do servidor): nunca na tela.
+  process.env.SECRETS_ENCRYPTION_KEY = e2eEnv().SECRETS_ENCRYPTION_KEY
+  const { decryptSecret } = await import('../../server/lib/crypto')
+  const pool = new pg.Pool({ connectionString: E2E_DB })
+  let code = ''
+  for (let i = 0; i < 20 && !code; i++) {
+    const r = await pool.query(`select m.secret_params_enc from outbound_messages m join people p on p.id = m.person_id
+      where m.kind = 'password_reset' and p.phone_e164 = '+5551900000005' order by m.created_at desc limit 1`)
+    if (r.rows[0]?.secret_params_enc) code = (JSON.parse(decryptSecret(r.rows[0].secret_params_enc)) as string[])[0] ?? ''
+    else await page.waitForTimeout(250)
+  }
+  await pool.end()
+  expect(code).toMatch(/^\d{6}$/)
+  await page.getByLabel('Código').fill(code === '000000' ? '111111' : '000000')
+  await page.getByRole('button', { name: 'Continuar' }).click()
+  await expect(page.getByText(/Código incorreto ou expirado/)).toBeVisible()
+  await page.getByLabel('Código').fill(code)
+  await page.getByRole('button', { name: 'Continuar' }).click()
+  await expect(page.getByRole('heading', { name: 'Crie uma nova senha' })).toBeVisible()
+  await page.getByLabel('Nova senha').fill('bento senha nova 2026')
+  await page.getByLabel('Repita a senha').fill('bento senha nova 2026')
+  await page.getByRole('button', { name: 'Salvar e entrar' }).click()
+  await expect(page).toHaveURL(/\/i\/porto/)
+  await page.context().close()
 })

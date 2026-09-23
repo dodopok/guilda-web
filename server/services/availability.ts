@@ -324,7 +324,7 @@ export async function availabilityDashboard(db: Db, ctx: ChurchContext, month: s
     month,
     monthLabel: monthName(month),
     request: req ? { id: req.id, status: req.status, sendAt: req.sendAt, deadlineAt: req.deadlineAt, sentAt: req.sentAt } : null,
-    // Texto exato do modelo enviado, com {{n}}: primeiro nome, mês, igreja, prazo, link.
+    // Texto exato do modelo enviado, com variáveis nomeadas ({{nome}}, {{mes}}, {{igreja}}, {{prazo}}, {{link}}).
     templateBody: TEMPLATES.availability_request.body,
     link: `${getConfig().appBaseUrl}/i/${ctx.church.slug}/disponibilidade/${month}`,
     summary: {

@@ -187,6 +187,16 @@ describe('canal pelo YCloud', () => {
     })
   })
 
+  it('variáveis nomeadas levam parameter_name; o código de senha vai também no botão', () => {
+    const named = buildYCloudPayload(SENDER, { to: '+5551999990000', templateName: 'guilda_lembrete', language: 'pt_BR', params: ['Ana', 'Porto'], paramNames: ['nome', 'igreja'] })
+    expect(named.template.components).toEqual([{ type: 'body', parameters: [{ type: 'text', parameter_name: 'nome', text: 'Ana' }, { type: 'text', parameter_name: 'igreja', text: 'Porto' }] }])
+    const otp = buildTemplatePayload({ to: '+5551999990000', templateName: 'guilda_codigo', language: 'pt_BR', params: ['482915'], otpCode: '482915' })
+    expect(otp.template.components).toEqual([
+      { type: 'body', parameters: [{ type: 'text', text: '482915' }] },
+      { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: '482915' }] },
+    ])
+  })
+
   it('mesmos bloqueios do canal oficial; envia com X-API-Key e trata falhas', async () => {
     const f = await makeChurch(db(), 'porto')
     await configureYCloud(db(), f.church.id)

@@ -2,7 +2,7 @@ import { and, eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import { accounts, authTokens, outboundMessages, people } from '../../server/db/schema'
 import { decryptSecret } from '../../server/lib/crypto'
-import { acceptInvite, createInvite, describeInvite, getSession, login, requestPasswordReset, resetPassword } from '../../server/services/auth'
+import { acceptInvite, coordinatorResendAccess, createInvite, describeInvite, getSession, login, requestPasswordReset, resetPassword, verifyResetCode } from '../../server/services/auth'
 import { createPerson } from '../../server/services/people'
 import { makeChurch, useDb } from '../helpers'
 
@@ -80,18 +80,36 @@ describe('convites e acesso', () => {
     expect(ok.token).toBeTruthy()
   })
 
-  it('redefinição de senha: link único, revoga sessões', async () => {
+  it('nova senha por código no WhatsApp: tentativas limitadas, uso único, revoga sessões', async () => {
     const f = await makeChurch(db(), 'porto')
     const s = await login(db(), { login: f.ana.phone!, password: 'senha-de-teste-123', client: 'web' })
     await requestPasswordReset(db(), f.ana.phone!)
     const msg = await db().query.outboundMessages.findFirst({ where: and(eq(outboundMessages.churchId, f.church.id), eq(outboundMessages.kind, 'password_reset')) })
     expect(msg?.status).toBe('queued')
-    const token = tokenFromMessage(msg!.secretParamsEnc)
+    expect(msg!.preview).not.toMatch(/\d{6}/) // o código nunca aparece no painel
+    const code = (JSON.parse(decryptSecret(msg!.secretParamsEnc!)) as string[])[0]!
+    expect(code).toMatch(/^\d{6}$/)
+    const wrong = code === '000000' ? '111111' : '000000'
+    await expect(verifyResetCode(db(), f.ana.phone!, wrong)).rejects.toMatchObject({ code: 'invalid_code' })
+    const { token } = await verifyResetCode(db(), f.ana.phone!.replace('+55', ''), code)
+    // O mesmo código não serve de novo.
+    await expect(verifyResetCode(db(), f.ana.phone!, code)).rejects.toMatchObject({ code: 'invalid_code' })
     await resetPassword(db(), token, 'nova senha bem segura')
     expect(await getSession(db(), s.token)).toBeNull()
     await expect(resetPassword(db(), token, 'outra senha bem segura')).rejects.toMatchObject({ status: 410 })
     await expect(login(db(), { login: f.ana.phone!, password: 'nova senha bem segura', client: 'web' })).resolves.toBeTruthy()
     // Pedido para telefone inexistente não falha nem cria nada.
     await requestPasswordReset(db(), '+5511999999999')
+  })
+
+  it('código de senha: 5 erros revogam o código; a coordenação não troca senha de quem tem conta', async () => {
+    const f = await makeChurch(db(), 'porto')
+    await requestPasswordReset(db(), f.ana.phone!)
+    const msg = await db().query.outboundMessages.findFirst({ where: and(eq(outboundMessages.churchId, f.church.id), eq(outboundMessages.kind, 'password_reset')) })
+    const code = (JSON.parse(decryptSecret(msg!.secretParamsEnc!)) as string[])[0]!
+    const wrong = code === '000000' ? '111111' : '000000'
+    for (let i = 0; i < 5; i++) await expect(verifyResetCode(db(), f.ana.phone!, wrong)).rejects.toMatchObject({ code: 'invalid_code' })
+    await expect(verifyResetCode(db(), f.ana.phone!, code)).rejects.toMatchObject({ code: 'invalid_code' })
+    await expect(coordinatorResendAccess(db(), f.coord.ctx, f.ana.id)).rejects.toMatchObject({ code: 'has_account' })
   })
 })
