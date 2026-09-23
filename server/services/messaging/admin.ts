@@ -43,7 +43,9 @@ export async function getChannelConfig(db: Db, ctx: ChurchContext) {
       label: TEMPLATES[kind].label,
       defaultName: TEMPLATES[kind].defaultName,
       body: TEMPLATES[kind].body,
-      params: TEMPLATES[kind].params,
+      category: TEMPLATES[kind].category,
+      vars: TEMPLATES[kind].vars,
+      codeExpirationMinutes: TEMPLATES[kind].codeExpirationMinutes ?? null,
       name: c.templates[kind]?.name ?? TEMPLATES[kind].defaultName,
       language: c.templates[kind]?.language ?? 'pt_BR',
       status: c.templates[kind]?.status ?? 'not_submitted',
@@ -219,6 +221,8 @@ export async function simulatedMessageBody(db: Db, ctx: ChurchContext, messageId
   requireCoordinator(ctx)
   const msg = await db.query.outboundMessages.findFirst({ where: and(eq(outboundMessages.churchId, ctx.church.id), eq(outboundMessages.id, messageId)) })
   if (!msg || msg.provider !== 'simulation' || msg.status !== 'simulated') throw notFound('Mensagem simulada')
+  // Códigos de senha nunca aparecem aqui, nem simulados.
+  if (TEMPLATES[msg.kind as MessageKind]?.category === 'AUTHENTICATION') return { id: msg.id, simulated: true, body: msg.preview }
   const params = msg.secretParamsEnc ? JSON.parse(decryptSecret(msg.secretParamsEnc)) as string[] : msg.params
   return { id: msg.id, simulated: true, body: renderTemplate(msg.kind as MessageKind, params) }
 }

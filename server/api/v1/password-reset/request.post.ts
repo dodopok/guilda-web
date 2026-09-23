@@ -8,5 +8,5 @@ export default defineApiHandler(async (event) => {
   const input = await body(event, schema)
   await requestPasswordReset(db(), input.login)
   // Resposta idêntica exista ou não a conta.
-  return { ok: true, message: 'Se houver uma conta com este telefone e consentimento para mensagens, enviaremos um link pelo WhatsApp.' }
+  return { ok: true, message: 'Se houver uma conta com este telefone e consentimento para mensagens, enviaremos um código pelo WhatsApp.' }
 })

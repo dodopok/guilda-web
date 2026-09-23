@@ -7,7 +7,7 @@ import { decryptSecret } from '../../lib/crypto'
 import { ProviderError, sendTemplateMessage } from '../../integrations/whatsapp-cloud'
 import { sendYCloudTemplate } from '../../integrations/ycloud'
 import { type OutboundMessage, type WhatsappChannel, getChannel, hasConsent } from './outbox'
-import { type MessageKind, TEMPLATES } from './templates'
+import { type MessageKind, TEMPLATES, paramNames } from './templates'
 
 // Decide por onde uma mensagem pode sair. Nunca recai silenciosamente na simulação:
 // um canal oficial incompleto bloqueia a mensagem com o motivo.
@@ -126,10 +126,23 @@ async function processOne(db: Db, msg: OutboundMessage, now: Date, wa: ReturnTyp
       sentAt: now,
       nextAttemptAt: null,
     })
+    // Fora de produção, o código de senha simulado aparece só no log do servidor: a tela de
+    // mensagens nunca o mostra (seria um jeito de a coordenação entrar na conta de alguém).
+    if (TEMPLATES[kind]?.category === 'AUTHENTICATION' && process.env.NODE_ENV !== 'production') {
+      console.log(`[simulação] código de verificação para final ${msg.toPhone.slice(-4)}: ${params[0]}`)
+    }
     return
   }
 
-  const send = { to: msg.toPhone, templateName: route.templateName, language: route.language, params }
+  const def = TEMPLATES[msg.kind as MessageKind]
+  const send = {
+    to: msg.toPhone,
+    templateName: route.templateName,
+    language: route.language,
+    params,
+    paramNames: paramNames(msg.kind as MessageKind),
+    otpCode: def?.category === 'AUTHENTICATION' ? params[0] : undefined,
+  }
   try {
     // O id da mensagem na fila vai como externalId no YCloud para rastrear nos webhooks.
     const { providerMessageId } = route.kind === 'ycloud'

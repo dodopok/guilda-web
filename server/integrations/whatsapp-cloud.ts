@@ -18,6 +18,10 @@ export interface TemplateSend {
   templateName: string
   language: string
   params: string[]
+  // Nomes das variáveis (modelos com variáveis nomeadas); ausente em modelos posicionais.
+  paramNames?: string[]
+  // Modelo de autenticação: o código também vai no botão "Copiar código".
+  otpCode?: string
 }
 
 export class ProviderError extends Error {
@@ -42,6 +46,17 @@ const errorResponse = z.object({
   }),
 })
 
+// Componentes do modelo: variáveis nomeadas levam parameter_name; o modelo de
+// autenticação repete o código no botão "Copiar código" (botão de URL, índice 0).
+export function templateComponents(msg: TemplateSend) {
+  const body = {
+    type: 'body',
+    parameters: msg.params.map((text, i) => (msg.paramNames?.[i] ? { type: 'text', parameter_name: msg.paramNames[i], text } : { type: 'text', text })),
+  }
+  if (!msg.otpCode) return [body]
+  return [body, { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: msg.otpCode }] }]
+}
+
 export function buildTemplatePayload(msg: TemplateSend) {
   return {
     messaging_product: 'whatsapp',
@@ -51,12 +66,7 @@ export function buildTemplatePayload(msg: TemplateSend) {
     template: {
       name: msg.templateName,
       language: { code: msg.language },
-      components: [
-        {
-          type: 'body',
-          parameters: msg.params.map((text) => ({ type: 'text', text })),
-        },
-      ],
+      components: templateComponents(msg),
     },
   }
 }

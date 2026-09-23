@@ -21,13 +21,15 @@ const groups = computed(() => (data.value?.ministries ?? []).map((m) => ({ m, du
 
 // ------------------------------------------------------------ pessoas
 const search = ref('')
-const filter = ref<'todas' | 'sem-acesso' | 'sem-whatsapp' | 'sem-funcao' | 'inativas'>('todas')
+type FilterKey = 'todas' | 'coordenacao' | 'pastores' | 'sem-acesso' | 'sem-whatsapp' | 'sem-funcao' | 'inativas'
+const filter = ref<FilterKey>('todas')
 const hasWa = (p: PersonAdmin) => Boolean(p.phone) && p.consent?.status === 'granted'
 const activePeople = computed(() => (data.value?.people ?? []).filter((p) => p.status === 'active'))
-type FilterKey = 'todas' | 'sem-acesso' | 'sem-whatsapp' | 'sem-funcao' | 'inativas'
 const filters = computed(() => {
   const list: { key: FilterKey, label: string, n: number }[] = [
     { key: 'todas' as const, label: 'Todas', n: activePeople.value.length },
+    { key: 'coordenacao' as const, label: 'Coordenação', n: activePeople.value.filter((p) => p.roles.includes('coordinator')).length },
+    { key: 'pastores' as const, label: 'Pastores', n: activePeople.value.filter((p) => p.roles.includes('pastor')).length },
     { key: 'sem-acesso' as const, label: 'Sem acesso', n: activePeople.value.filter((p) => !p.hasAccount).length },
     { key: 'sem-whatsapp' as const, label: 'Sem WhatsApp', n: activePeople.value.filter((p) => !hasWa(p)).length },
     { key: 'sem-funcao' as const, label: 'Sem função', n: activePeople.value.filter((p) => !p.dutyIds.length).length },
@@ -40,11 +42,13 @@ const list = computed(() => {
   const q = search.value.trim().toLowerCase()
   const base = filter.value === 'inativas' ? (data.value?.people ?? []).filter((p) => p.status !== 'active') : activePeople.value
   return base.filter((p) => (!q || p.displayName.toLowerCase().includes(q))
+    && (filter.value !== 'coordenacao' || p.roles.includes('coordinator'))
+    && (filter.value !== 'pastores' || p.roles.includes('pastor'))
     && (filter.value !== 'sem-acesso' || !p.hasAccount)
     && (filter.value !== 'sem-whatsapp' || !hasWa(p))
     && (filter.value !== 'sem-funcao' || !p.dutyIds.length))
 })
-const roleTag = (p: PersonAdmin) => (p.roles.includes('coordinator') ? 'Coordenação' : p.roles.includes('pastor') ? 'Pastoral' : '')
+const roleTag = (p: PersonAdmin) => roleTags(p.roles).join(' · ')
 const dutiesLine = (p: PersonAdmin) => {
   const names = p.dutyIds.map(dutyName).filter(Boolean)
   return names.length ? names.slice(0, 3).join(' · ') + (names.length > 3 ? ` · +${names.length - 3}` : '') : 'Sem função marcada'
@@ -57,12 +61,12 @@ const personId = ref<string | null>(null)
 const person = computed(() => data.value?.people.find((p) => p.id === personId.value) ?? null)
 const personOpen = computed({ get: () => Boolean(personId.value), set: (v) => { if (!v) personId.value = null } })
 const personDuties = ref<Set<string>>(new Set())
-const edit = reactive({ displayName: '', phone: '', coordinator: false, pastor: false, restExempt: false })
+const edit = reactive({ displayName: '', phone: '', roles: ['participant'] as string[], restExempt: false })
 function openPerson(id: string) {
   personId.value = id
   const p = data.value?.people.find((x) => x.id === id)
   personDuties.value = new Set(p?.dutyIds ?? [])
-  Object.assign(edit, { displayName: p?.displayName ?? '', phone: p?.phone ?? '', coordinator: p?.roles.includes('coordinator') ?? false, pastor: p?.roles.includes('pastor') ?? false, restExempt: p?.restExempt ?? false })
+  Object.assign(edit, { displayName: p?.displayName ?? '', phone: p?.phone ?? '', roles: [...(p?.roles ?? ['participant'])], restExempt: p?.restExempt ?? false })
   lastInvite.value = null
 }
 function toggleDuty(id: string) {
@@ -109,7 +113,7 @@ async function savePerson() {
   const p = person.value
   if (!p) return
   try {
-    const roles = ['participant', ...(edit.coordinator ? ['coordinator'] : []), ...(edit.pastor ? ['pastor'] : [])]
+    const roles = [...new Set(['participant', ...edit.roles])]
     const changes: Record<string, unknown> = {}
     if (edit.displayName.trim() !== p.displayName) changes.displayName = edit.displayName.trim()
     if (normalizePhoneBR(edit.phone) !== (p.phone ?? null)) changes.phone = edit.phone.trim() || null
@@ -139,17 +143,17 @@ async function setActive(active: boolean) {
 
 // Nova pessoa
 const newOpen = ref(false)
-const np = reactive({ name: '', phone: '' })
+const np = reactive({ name: '', phone: '', roles: ['participant'] as string[] })
 async function saveNew() {
   if (np.name.trim().length < 2) {
     toast.error('Escreva o nome.')
     return
   }
   try {
-    const r = await capi<{ person: { id: string } }>('/people', { method: 'POST', body: { displayName: np.name.trim(), phone: np.phone.trim() || null } })
+    const r = await capi<{ person: { id: string } }>('/people', { method: 'POST', body: { displayName: np.name.trim(), phone: np.phone.trim() || null, roles: np.roles } })
     toast.ok(`${np.name.trim().split(' ')[0]} entrou na lista. Agora marque as funções.`)
     newOpen.value = false
-    Object.assign(np, { name: '', phone: '' })
+    Object.assign(np, { name: '', phone: '', roles: ['participant'] })
     await refresh()
     openPerson(r.person.id)
   } catch (e) {
@@ -237,11 +241,6 @@ async function saveNewDuty() {
 }
 const dataOpen = ref(false)
 watch(personId, () => (dataOpen.value = false))
-function setRole(r: 'vol' | 'coord' | 'pastor') {
-  if (r === 'vol') Object.assign(edit, { coordinator: false, pastor: false })
-  else if (r === 'coord') edit.coordinator = !edit.coordinator
-  else edit.pastor = !edit.pastor
-}
 </script>
 
 <template>
@@ -454,6 +453,16 @@ function setRole(r: 'vol' | 'coord' | 'pastor') {
         </div>
       </template>
       <template v-if="person">
+        <div style="margin-top:14px">
+          <span class="field__label">Papel na igreja</span>
+          <RolePicker v-model="edit.roles" />
+          <p
+            class="small muted"
+            style="margin-top:6px"
+          >
+            Coordenação monta escalas e publica; pastor(a) aparece em “Quem prega?” e edita o roteiro. Uma pessoa pode ter os dois, e mais de uma pessoa pode coordenar.
+          </p>
+        </div>
         <div style="margin-top:14px;border:1.5px solid var(--control);border-radius:14px;overflow:hidden">
           <button
             type="button"
@@ -465,10 +474,10 @@ function setRole(r: 'vol' | 'coord' | 'pastor') {
             <span class="grow"><span
               class="strong"
               style="display:block"
-            >Dados e papel</span><span
+            >Dados</span><span
               class="muted"
               style="display:block;font-size:13.5px"
-            >Nome, celular, coordenação ou pastoral</span></span>
+            >Nome, celular, descanso e desativar</span></span>
             <Icon
               :name="dataOpen ? 'chevron-up' : 'chevron-down'"
               class="listrow__chev"
@@ -495,35 +504,6 @@ function setRole(r: 'vol' | 'coord' | 'pastor') {
             >
               Trocar o número retira a autorização do WhatsApp e cancela convites pendentes.
             </p>
-            <div>
-              <span class="field__label">Papel</span>
-              <div class="chips">
-                <button
-                  type="button"
-                  class="chip"
-                  :aria-pressed="!edit.coordinator && !edit.pastor"
-                  @click="setRole('vol')"
-                >
-                  Voluntário(a)
-                </button>
-                <button
-                  type="button"
-                  class="chip"
-                  :aria-pressed="edit.coordinator"
-                  @click="setRole('coord')"
-                >
-                  Coordenação
-                </button>
-                <button
-                  type="button"
-                  class="chip"
-                  :aria-pressed="edit.pastor"
-                  @click="setRole('pastor')"
-                >
-                  Pastoral
-                </button>
-              </div>
-            </div>
             <SwitchRow
               v-model="edit.restExempt"
               title="Não entra no alerta de descanso"
@@ -672,6 +652,10 @@ function setRole(r: 'vol' | 'coord' | 'pastor') {
         <label class="field"><span class="field__label">Celular (WhatsApp)</span><PhoneInput
           v-model="np.phone"
         /></label>
+        <div>
+          <span class="field__label">Papel na igreja</span>
+          <RolePicker v-model="np.roles" />
+        </div>
         <button class="btn btn--block">
           Cadastrar
         </button>

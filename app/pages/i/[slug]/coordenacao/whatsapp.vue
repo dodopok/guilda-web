@@ -5,7 +5,7 @@ const { capi, tz, info, link } = useChurch()
 const toast = useToast()
 
 type Mode = 'disabled' | 'simulation' | 'cloud_api' | 'ycloud'
-interface TemplateRow { kind: string, label: string, defaultName: string, body: string, params: string[], name: string, language: string, status: string }
+interface TemplateRow { kind: string, label: string, defaultName: string, body: string, category: 'UTILITY' | 'AUTHENTICATION', vars: { name: string, label: string, example: string }[], codeExpirationMinutes: number | null, name: string, language: string, status: string }
 interface Channel {
   mode: Mode
   lastWebhookAt: string | null
@@ -485,7 +485,7 @@ async function save() {
               <span
                 class="muted"
                 style="display:block;font-size:13px"
-              >Variáveis: {{ t.params.join(', ') }}</span>
+              >{{ t.category === 'AUTHENTICATION' ? 'Autenticação · código de 6 dígitos' : `Utilidade · ${t.vars.map((x) => x.name).join(', ')}` }}</span>
             </span>
             <span
               class="stag"
@@ -511,19 +511,55 @@ async function save() {
               v-if="tplStatus[t.kind] === 'rejected'"
               style="font-size:13.5px;color:#8f2a1e;font-weight:700"
             >
-              A Meta rejeitou este modelo. Ajuste o texto no painel e envie de novo.
+              A Meta rejeitou este modelo. Confira categoria e variáveis acima e envie de novo com o texto atual.
             </p>
-            <p class="small muted">
-              Nome no painel: <code class="mono">{{ t.name }}</code> · categoria utilidade · português
+            <dl class="tplmeta">
+              <dt>Nome</dt>
+              <dd><code class="mono">{{ t.name }}</code></dd>
+              <dt>Categoria</dt>
+              <dd>{{ t.category === 'AUTHENTICATION' ? 'Autenticação (Authentication)' : 'Utilidade (Utility)' }}</dd>
+              <dt>Idioma</dt>
+              <dd>Português (BR) · pt_BR</dd>
+            </dl>
+            <template v-if="t.category === 'AUTHENTICATION'">
+              <p class="small">
+                No YCloud, escolha <strong>Authentication</strong> e o tipo de código <strong>Copy code</strong>. O texto é o padrão da Meta: não tem link nem variável para escrever. Marque <strong>Add security recommendation</strong> e <strong>Code expiration</strong> com {{ t.codeExpirationMinutes }} minutos. Exemplo de código: <code class="mono">{{ t.vars[0]?.example }}</code>.
+              </p>
+            </template>
+            <template v-else>
+              <p class="small">
+                Tipo de variável <strong>nome</strong> (não número). Cadastre cada uma com o exemplo:
+              </p>
+              <table class="tplvars">
+                <thead>
+                  <tr>
+                    <th scope="col">
+                      Variável
+                    </th>
+                    <th scope="col">
+                      Exemplo
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="x in t.vars"
+                    :key="x.name"
+                  >
+                    <td><code class="mono">{{ x.name }}</code><span class="muted"> · {{ x.label }}</span></td>
+                    <td>{{ x.example }}</td>
+                  </tr>
+                </tbody>
+              </table>
               <button
                 type="button"
                 class="link"
-                style="font-size:13.5px;margin-left:6px"
+                style="font-size:13.5px;align-self:flex-start"
                 @click="copy(t.body)"
               >
-                Copiar texto
+                Copiar texto do corpo
               </button>
-            </p>
+            </template>
             <div
               class="chips"
               role="radiogroup"

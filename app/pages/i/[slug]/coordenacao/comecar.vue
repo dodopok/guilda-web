@@ -83,15 +83,26 @@ const people = ref<PersonAdmin[]>([])
 async function loadPeople() {
   people.value = (await capi<{ people: PersonAdmin[] }>('/people')).people.filter((p) => p.status === 'active')
 }
-const np = reactive({ name: '', phone: '' })
+const np = reactive({ name: '', phone: '', roles: ['participant'] as string[] })
 async function addPerson() {
   if (np.name.trim().length < 2) return
   try {
-    await capi('/people', { method: 'POST', body: { displayName: np.name.trim(), phone: np.phone.trim() || null } })
-    Object.assign(np, { name: '', phone: '' })
+    await capi('/people', { method: 'POST', body: { displayName: np.name.trim(), phone: np.phone.trim() || null, roles: np.roles } })
+    Object.assign(np, { name: '', phone: '', roles: ['participant'] })
     await loadPeople()
   } catch (e) {
     toast.error(e)
+  }
+}
+
+// Papel de quem já está na lista (inclusive quem coordena, que pode ser pastor(a) também).
+async function setRoles(p: PersonAdmin, roles: string[]) {
+  try {
+    await capi(`/people/${p.id}`, { method: 'PATCH', body: { roles } })
+    p.roles = roles
+  } catch (e) {
+    toast.error(e)
+    await loadPeople()
   }
 }
 
@@ -387,7 +398,7 @@ async function finish(to: 'preparar' | 'mesa') {
             class="soft"
             style="margin-top:8px"
           >
-            Comece com algumas pessoas — nome e celular bastam. As funções de cada uma você marca depois, e cada pessoa recebe um convite para criar a senha.
+            Comece com algumas pessoas — nome e celular bastam. Marque quem é pastor(a) e quem ajuda na coordenação (pode ser mais de uma pessoa, e a mesma pessoa pode ter os dois). As funções você marca depois.
           </p>
         </div>
         <form
@@ -413,6 +424,11 @@ async function finish(to: 'preparar' | 'mesa') {
           >
             Adicionar
           </button>
+          <RolePicker
+            v-model="np.roles"
+            small
+            style="flex-basis:100%"
+          />
         </form>
         <div
           class="stack-sm"
@@ -422,17 +438,23 @@ async function finish(to: 'preparar' | 'mesa') {
             v-for="p in people"
             :key="p.id"
             class="row"
-            style="flex-wrap:nowrap;gap:12px;padding:8px 12px;background:var(--surface-3);border-radius:14px"
+            style="gap:8px 12px;padding:8px 12px;background:var(--surface-3);border-radius:14px"
           >
             <span class="av av--md">{{ initials(p.displayName) }}</span>
             <span
               class="grow"
-              style="font-weight:700"
+              style="font-weight:700;min-width:120px"
             >{{ p.displayName }}</span>
             <span
               class="muted"
               style="font-size:13.5px"
             >{{ displayPhone(p.phone) ?? 'sem telefone' }}</span>
+            <RolePicker
+              :model-value="p.roles"
+              small
+              style="flex-basis:100%;padding-left:46px"
+              @update:model-value="setRoles(p, $event)"
+            />
           </div>
         </div>
         <div class="row">

@@ -8,9 +8,7 @@ if (memberships.value.length === 1 && !me.value?.account.isPlatformAdmin) {
 }
 const firstName = computed(() => me.value?.account.displayName.split(' ')[0] ?? '')
 function role(m: Membership) {
-  if (m.roles.includes('coordinator')) return 'Coordenação'
-  if (m.roles.includes('pastor')) return 'Pastoral'
-  return 'Voluntário(a)'
+  return roleTags(m.roles).join(' · ') || 'Voluntário(a)'
 }
 </script>
 

@@ -13,7 +13,7 @@ O YCloud é parceiro oficial da Meta, conecta um número que já está no aplica
 
 1. No YCloud: criar a chave em *Developers → API Keys*; criar o endpoint de webhook com a URL mostrada na tela "Canal do WhatsApp" e os dois eventos acima; guardar o segredo do endpoint.
 2. Na Guilda, tela "Canal do WhatsApp": escolher "Canal oficial pelo YCloud", informar o número, a chave e o segredo (ficam cifrados e nunca voltam ao navegador). Deixar o **modo de teste** ligado com um ou dois números de quem autorizou.
-3. Cadastrar os modelos no YCloud (*WhatsApp → Templates*) com os nomes e textos da tela, categoria utilidade, português; marcar como aprovados na Guilda quando a Meta aprovar.
+3. Cadastrar os modelos no YCloud (*WhatsApp → Templates*) exatamente como a tela do canal mostra (nome, categoria, idioma pt_BR, texto e, para cada variável, o **nome** e o **exemplo**); marcar como aprovados na Guilda quando a Meta aprovar. Ver "Modelos de mensagem" abaixo.
 4. Com `WHATSAPP_ALLOW_REAL_SEND=true` no servidor, enviar um lembrete de teste, conferir que chegou e que o aplicativo WhatsApp Business continua enviando e recebendo no mesmo número; então registrar a comprovação de coexistência.
 5. Só depois desligar o modo de teste.
 
@@ -22,6 +22,19 @@ O YCloud é parceiro oficial da Meta, conecta um número que já está no aplica
 1. Envio real pelo YCloud e chegada dos webhooks (sem credenciais nesta implementação; testado por contrato em `tests/services/whatsapp.test.ts`).
 2. Formato exato do corpo de erro HTTP do YCloud: a leitura é tolerante (`error.code`, `error.message`, `error.whatsappApiError`) e cai no código HTTP.
 3. Se o YCloud envia `whatsappMessage.from` em todos os eventos de estado (a documentação mostra o objeto `WhatsappMessage` completo); se não enviar, o evento é recusado com 401 e aparece nos registros do YCloud.
+
+## Modelos de mensagem
+
+Lições da primeira submissão (convite e senha rejeitados; YCloud recusou `{{1}}`):
+
+- **Variáveis nomeadas.** Todos os modelos de utilidade usam variáveis com nome (`{{nome}}`, `{{igreja}}`, `{{link}}`…), e cada uma é cadastrada com um exemplo. O envio informa `parameter_name` de cada variável (Cloud API e YCloud).
+- **Senha é autenticação, e autenticação só leva código.** A Meta recusa como utilidade qualquer mensagem de senha ou acesso, e o modelo de autenticação não aceita link nem texto livre: é o texto padrão da Meta com o código e o botão "Copiar código". Por isso "Esqueci minha senha" agora envia **um código de 6 dígitos** (`guilda_codigo`, validade de 10 minutos, 5 tentativas, um pedido a cada 2 minutos); a pessoa digita o código no app e cria a senha nova. O código vai também no botão (componente `button`, `sub_type: url`, índice 0), como a Meta exige.
+- **Convite é utilidade sem falar em senha.** O texto virou um aviso de inclusão na escala com o link individual ("…incluiu você na escala… Por este link você vê suas tarefas e confirma presença"), sem as palavras senha, acesso, login ou código. A criação da senha acontece na página do link.
+- A coordenação **não** reenvia acesso de quem já tem conta (não pode trocar a senha de ninguém): a própria pessoa usa "Esqueci minha senha".
+- Códigos nunca aparecem no painel, nem em simulação. Fora de produção, o código simulado vai só para o log do servidor.
+- A migração `0005` voltou para "rascunho" a situação dos modelos guardada nas igrejas: os textos mudaram e precisam ser submetidos de novo.
+
+Se a Meta ainda recategorizar o convite, a saída é transformá-lo em aviso sem link (a pessoa entra pelo site com o celular e recebe um código), o que não exige mudança no banco.
 
 ## WhatsApp (Cloud API direta)
 
@@ -32,7 +45,7 @@ O YCloud é parceiro oficial da Meta, conecta um número que já está no aplica
 - **Envio** por `POST {graph}/{versão}/{phone-number-id}/messages` com mensagem do tipo `template` e parâmetros de corpo. Parâmetros são limpos de quebras de linha e espaços repetidos (a Cloud API os rejeita). Erros temporários (5xx, 429, limites 130429/131048/131056…) voltam à fila com espera de 1, 5, 15 e 60 minutos até 5 tentativas; erros definitivos ficam como falha com o código da Meta. Mensagem presa em envio vira "incerta" e não é reenviada sozinha.
 - **Webhook** `POST /api/v1/webhooks/whatsapp`: assinatura `X-Hub-Signature-256` obrigatória com o app secret do canal, estados `sent → delivered → read` sem regressão, `failed` com motivo, eventos duplicados ignorados, resposta "PARAR/SAIR/STOP" revoga o consentimento. `GET` responde ao desafio `hub.challenge`.
 - **Nunca cai na simulação**: com o canal em `cloud_api` e algum requisito faltando, a mensagem fica bloqueada com o motivo. Simulação só acontece no modo `simulation`, com estado próprio ("Simulada — não enviada"), faixa permanente na interface e identificador `sim-…`.
-- **Modelos** (texto para submeter à Meta na categoria utilidade, em `server/services/messaging/templates.ts` e na tela do canal): convite, redefinição de senha, pedido de indisponibilidade, lembrete semanal, correção de lembrete, escala publicada, escala alterada, pedido de troca, músicas do culto e aviso à coordenação.
+- **Modelos** (em `server/services/messaging/templates.ts` e na tela do canal): boas-vindas à escala, código para nova senha, pedido de indisponibilidade, lembrete semanal, correção de lembrete, escala publicada, escala alterada, pedido de troca, músicas do culto, aviso de leitura e aviso à coordenação. Ver "Modelos de mensagem".
 
 ### Testado
 

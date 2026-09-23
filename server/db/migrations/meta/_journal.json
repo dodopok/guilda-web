@@ -29,6 +29,20 @@
       "when": 1790174767044,
       "tag": "0003_church_city",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790196240970,
+      "tag": "0004_auth_code_attempts",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790196302469,
+      "tag": "0005_reset_template_status",
+      "breakpoints": true
     }
   ]
 }

@@ -20,7 +20,7 @@ export const MESSAGE_STATUS: Record<string, { label: string, tone: 'ok' | 'wait'
 
 export const ROLE_LABEL: Record<string, string> = {
   coordinator: 'Coordenação',
-  pastor: 'Pastoral',
+  pastor: 'Pastor(a)',
   participant: 'Voluntário(a)',
 }
 
@@ -93,4 +93,9 @@ export const TASK_TAG: Record<string, { label: string, bg: string, fg: string }>
   confirmed: { label: 'confirmado', bg: '#e3f3e8', fg: '#155f30' },
   declined: { label: 'não pode', bg: '#fde4e0', fg: '#8f2a1e' },
   past: { label: 'feito', bg: '#f0efe9', fg: '#4a5450' },
+}
+
+// Papéis além de voluntário(a), para etiquetas: "Coordenação · Pastor(a)".
+export function roleTags(roles: string[]) {
+  return [roles.includes('coordinator') ? 'Coordenação' : null, roles.includes('pastor') ? 'Pastor(a)' : null].filter((x): x is string => Boolean(x))
 }

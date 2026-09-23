@@ -573,7 +573,7 @@
     },
     "/api/v1/password-reset/request": {
       "post": {
-        "summary": "Pedir link de nova senha pelo WhatsApp (resposta sempre igual)",
+        "summary": "Pedir código de 6 dígitos pelo WhatsApp, modelo de autenticação (resposta sempre igual)",
         "security": [],
         "x-guilda-access": "none",
         "parameters": [],
@@ -663,9 +663,105 @@
         }
       }
     },
+    "/api/v1/password-reset/verify": {
+      "post": {
+        "summary": "Trocar o código por um token de uso único (30 min); 5 erros revogam o código",
+        "security": [],
+        "x-guilda-access": "none",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "login": {
+                    "type": "string"
+                  },
+                  "code": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "login",
+                  "code"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sucesso (JSON)"
+          },
+          "400": {
+            "description": "Regra de negócio",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sem sessão",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem permissão",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Não encontrado (inclusive recurso de outra igreja)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflito (versão desatualizada, vaga cheia, troca já resolvida)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validação",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/password-reset/confirm": {
       "post": {
-        "summary": "Definir nova senha com o link recebido",
+        "summary": "Definir nova senha com o token e já entrar",
         "security": [],
         "x-guilda-access": "none",
         "parameters": [],

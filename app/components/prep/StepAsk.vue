@@ -52,8 +52,8 @@ const preview = computed(() => {
   if (!d) return ''
   const name = (withWa.value[0]?.displayName ?? d.people[0]?.displayName ?? 'Maria').split(' ')[0]!
   const deadline = form.deadlineDate ? `${WEEKDAYS[new Date(`${form.deadlineDate}T12:00:00Z`).getUTCDay()]!.replace('-feira', '')}, ${form.deadlineDate.slice(8, 10)}/${form.deadlineDate.slice(5, 7)}, às ${hhmm(form.deadlineTime)}` : '…'
-  const params = [name, monthName(props.month), churchName.value, deadline, d.link]
-  return d.templateBody.replace(/\{\{(\d+)\}\}/g, (_, n) => params[Number(n) - 1] ?? '')
+  const values: Record<string, string> = { nome: name, mes: monthName(props.month), igreja: churchName.value, prazo: deadline, link: d.link }
+  return d.templateBody.replace(/\{\{([a-z0-9_]+)\}\}/g, (_, k: string) => values[k] ?? '')
 })
 
 const busy = ref(false)

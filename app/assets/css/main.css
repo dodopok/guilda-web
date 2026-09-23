@@ -264,6 +264,7 @@ button.listrow:hover, a.listrow:hover { background: var(--surface-2); color: inh
 .chip svg { width: 13px; height: 13px; }
 .chip[aria-pressed='true'] { background: var(--accent-soft); color: var(--accent-deep); border-color: var(--accent-mid); }
 .chip--lg { min-height: 38px; font-size: 14px; }
+.chip--sm { min-height: 30px; padding: 3px 10px; font-size: 12.5px; }
 .chip--dark[aria-pressed='true'] { background: var(--ink); color: #fff; border-color: var(--ink); }
 .chip--person { padding: 4px 10px 4px 4px; min-height: 34px; }
 .chip--person .av { width: 24px; height: 24px; background: rgba(255, 255, 255, .7); color: var(--ink); font-size: 10.5px; }
@@ -469,6 +470,14 @@ details > summary::-webkit-details-marker { display: none; }
 .minibtn { width: 32px; height: 32px; border-radius: 10px; border: 1.5px solid var(--control); background: #fff; color: var(--ink-2); display: grid; place-items: center; padding: 0; flex: none; }
 .minibtn svg { width: 16px; height: 16px; }
 .minibtn:disabled { opacity: .35; }
+
+/* Modelos de mensagem (Canal do WhatsApp) */
+.tplmeta { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; font-size: 14px; }
+.tplmeta dt { color: var(--muted); font-weight: 700; }
+.tplmeta dd { margin: 0; }
+.tplvars { width: 100%; border-collapse: collapse; font-size: 14px; }
+.tplvars th { text-align: left; font-size: 12px; font-weight: 800; color: var(--muted); padding: 4px 8px 4px 0; text-transform: uppercase; letter-spacing: .04em; }
+.tplvars td { padding: 6px 8px 6px 0; border-top: 1px solid var(--line-2); vertical-align: top; }
 
 /* Utilitários de formulário e contagem */
 .fields-2 { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }

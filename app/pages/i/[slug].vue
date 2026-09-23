@@ -50,7 +50,7 @@ useHead(() => ({
 
 const me = computed(() => memberships.value.find((m) => m.slug === slug.value))
 const myName = computed(() => me.value?.displayName ?? '')
-const roleLabel = computed(() => (isCoordinator.value ? 'Coordenação' : isPastor.value ? 'Pastoral' : 'Voluntário(a)'))
+const roleLabel = computed(() => roleTags([...(isCoordinator.value ? ['coordinator'] : []), ...(isPastor.value ? ['pastor'] : [])]).join(' · ') || 'Voluntário(a)')
 
 // Telas da coordenação: só para quem coordena. A configuração inicial ocupa a tela toda.
 const bare = computed(() => route.path === link('/coordenacao/comecar'))

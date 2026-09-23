@@ -154,8 +154,10 @@ export const consents = pgTable('consents', {
 // Convites e redefinições de senha: token aleatório guardado só como hash.
 export const authTokens = pgTable('auth_tokens', {
   id: uuid('id').primaryKey().defaultRandom(),
-  purpose: text('purpose').notNull(), // invite | password_reset
+  purpose: text('purpose').notNull(), // invite | password_reset | password_code
   tokenHash: text('token_hash').notNull().unique(),
+  // Tentativas erradas (códigos de 6 dígitos): passa do limite, o código é revogado.
+  attempts: integer('attempts').notNull().default(0),
   churchId: uuid('church_id').references(() => churches.id, { onDelete: 'cascade' }),
   personId: uuid('person_id'),
   accountId: uuid('account_id').references(() => accounts.id, { onDelete: 'cascade' }),

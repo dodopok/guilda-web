@@ -1,7 +1,7 @@
 import { createHmac } from 'node:crypto'
 import { z } from 'zod'
 import { safeEqual } from '../lib/crypto'
-import { ProviderError, type TemplateSend } from './whatsapp-cloud'
+import { ProviderError, type TemplateSend, templateComponents } from './whatsapp-cloud'
 
 // Cliente mínimo do YCloud (provedor oficial parceiro da Meta), usado somente no servidor.
 // Referências (docs.ycloud.com): "Send a message directly" e "Webhook Integration Guide".
@@ -50,12 +50,7 @@ export function buildYCloudPayload(from: string, msg: TemplateSend, externalId?:
     template: {
       name: msg.templateName,
       language: { code: msg.language },
-      components: [
-        {
-          type: 'body',
-          parameters: msg.params.map((text) => ({ type: 'text', text })),
-        },
-      ],
+      components: templateComponents(msg),
     },
     ...(externalId ? { externalId } : {}),
   }
