@@ -161,6 +161,12 @@ test('fluxos 6 e 7: roteiro a partir do modelo, Estêvão, publicação e leitur
   await coord.getByRole('button', { name: /^Leituras/ }).click()
   await coord.getByRole('button', { name: /leituras do (dia no )?Estêvão/ }).click()
   await expect(coord.getByText(/Leituras do Estêvão no roteiro/)).toBeVisible()
+  // O salmo também tem quem guia.
+  await expect(coord.getByRole('group', { name: /^Quem lê Salmo/ }).getByRole('button', { name: /Clara Fictícia/ })).toBeVisible()
+  // Avisar quem lê antes de salvar: salva o rascunho e avisa o bloco recém-criado.
+  await coord.getByRole('button', { name: /^AF Alice Fictícia/ }).first().click()
+  await coord.getByRole('button', { name: /Avisar Alice pelo WhatsApp/ }).click()
+  await expect(coord.getByText(/Alice avisado\(a\) pelo WhatsApp/)).toBeVisible()
   await coord.getByRole('button', { name: 'Publicar', exact: true }).click()
   await expect(coord.getByText(/Roteiro publicado \(versão 1\)/)).toBeVisible()
 

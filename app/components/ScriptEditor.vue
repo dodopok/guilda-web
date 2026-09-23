@@ -63,7 +63,8 @@ const readings = computed(() => blocks.value.filter(isReading))
 const whoOf = (b?: EditableBlock) => (b?.responsibles ?? []).map((r) => r.name).join(', ')
 const musicBlock = computed(() => blocks.value.find((b) => b.type === 'music'))
 const announcements = computed(() => blocks.value.find((b) => b.type === 'announcements'))
-const readersMissing = computed(() => readings.value.filter((r) => !r.personId && r.type === 'reading').length)
+// Toda leitura, inclusive o salmo, tem alguém que guia.
+const readersMissing = computed(() => readings.value.filter((r) => !r.personId).length)
 const songCount = computed(() => musicBlock.value?.data.songIds?.length ?? 0)
 
 function isAdapted(b: EditableBlock) {
@@ -172,12 +173,18 @@ function addReading() {
 const nameOf = (id: string | null) => props.people.find((p) => p.id === id)?.displayName.split(' ')[0] ?? ''
 async function notifyReader(r: EditableBlock) {
   const index = readings.value.indexOf(r)
+  // Salvar recria os blocos com novos ids; o aviso usa o roteiro que o salvamento devolve,
+  // não o que está em memória (que ainda aponta para os blocos antigos).
+  let view: ScriptView | null = props.view
   if (dirty.value) {
-    const saved = await persist()
-    if (!saved) return
+    view = await persist()
+    if (!view) return
   }
-  const fresh = props.view.draft?.blocks.filter((b) => b.type === 'reading' || b.type === 'psalm')[index]
-  if (!fresh) return
+  const fresh = view.draft?.blocks.filter((b) => b.type === 'reading' || b.type === 'psalm')[index]
+  if (!fresh) {
+    toast.error('Não achei essa leitura no roteiro salvo. Recarregue a página e tente de novo.')
+    return
+  }
   try {
     const res = await capi<{ status: string, blockedReason: string | null }>(`/scripts/${props.serviceId}/blocks/${fresh.id}/notify`, { method: 'POST' })
     if (res.status === 'blocked') toast.error(`Mensagem não enviada: ${res.blockedReason === 'no_consent' ? 'a pessoa não autorizou o WhatsApp' : res.blockedReason === 'no_phone' ? 'sem telefone cadastrado' : 'canal de WhatsApp indisponível'}.`)
@@ -282,7 +289,7 @@ const busy = ref(false)
 async function persist() {
   busy.value = true
   try {
-    await capi(`/scripts/${props.serviceId}/blocks`, {
+    const view = await capi<ScriptView>(`/scripts/${props.serviceId}/blocks`, {
       method: 'PUT',
       body: { blocks: blocks.value.map((b) => ({ type: b.type, title: b.title, body: b.body, textSource: b.textSource, dutyId: b.dutyId, personId: b.personId, data: { ...b.data, items: b.data.items?.filter((it) => it.text.trim()) } })) },
     })
@@ -291,10 +298,10 @@ async function persist() {
     }
     baseline.value = serialize()
     emit('refresh')
-    return true
+    return view
   } catch (e) {
     toast.error(e)
-    return false
+    return null
   } finally {
     busy.value = false
   }
@@ -639,7 +646,6 @@ async function saveDraft() {
                   </button>
                 </div>
                 <div
-                  v-if="r.type === 'reading'"
                   class="row"
                   style="gap:6px;margin-top:10px"
                   role="group"
@@ -669,7 +675,7 @@ async function saveDraft() {
                     class="xsmall muted"
                   >Ninguém habilitado para leitura.</span>
                 </div>
-                <template v-if="r.type === 'reading'">
+                <template v-if="isReading(r)">
                   <p
                     v-if="r.personId && r.notified && r.personId === r.origPerson && r.data.reference === r.origRef"
                     class="xsmall strong row"

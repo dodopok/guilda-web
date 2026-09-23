@@ -11,7 +11,7 @@ export class AppError extends Error {
   }
 }
 
-const FEMININE = new Set(['Igreja', 'Pessoa', 'Função', 'Tarefa', 'Designação', 'Música', 'Mensagem simulada', 'Conta'])
+const FEMININE = new Set(['Igreja', 'Pessoa', 'Função', 'Tarefa', 'Designação', 'Música', 'Mensagem simulada', 'Conta', 'Leitura'])
 export const notFound = (what = 'Registro') => new AppError(404, 'not_found', `${what} não encontrad${FEMININE.has(what) ? 'a' : 'o'}.`)
 export const forbidden = (message = 'Você não tem permissão para esta ação.') => new AppError(403, 'forbidden', message)
 export const conflict = (code: string, message: string, details?: unknown) => new AppError(409, code, message, details)
