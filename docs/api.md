@@ -39,7 +39,7 @@ Sessões duram `SESSION_TTL_DAYS` (30). Trocar a senha ou redefini-la encerra as
 | Cultos e escala | `services`, `services/sundays`, `services/{id}/slots`, `slots/{id}/assignments`, `schedule/{month}` (editor), `schedule/{month}/publish`, `schedule/{month}/published`, `schedule/{month}/history`, `assignments/{id}/reassign` |
 | Mensagens | `messages`, `messages/{id}/resend`, `messages/{id}/simulated`, `reminders`, `whatsapp`, `whatsapp/coexistence` |
 | Liturgia | `templates`, `scripts/{serviceId}` (+ `/blocks`, `/publish`, `/versions`, `/export`, `/liturgical-data`, `/music`), `songs` |
-| Webhook | `GET/POST /api/v1/webhooks/whatsapp` (assinatura `X-Hub-Signature-256` obrigatória) |
+| Webhooks | `GET/POST /api/v1/webhooks/whatsapp` (Cloud API, assinatura `X-Hub-Signature-256`) e `POST /api/v1/webhooks/ycloud` (YCloud, assinatura `YCloud-Signature`) |
 
 ## Para o cliente Flutter
 

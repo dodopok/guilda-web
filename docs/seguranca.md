@@ -5,7 +5,7 @@
 - Toda tabela com dados de uma comunidade tem `church_id`. Tabelas referenciadas têm `UNIQUE (church_id, id)` e as referências usam **chave estrangeira composta** `(church_id, x_id)`: o banco recusa, por exemplo, uma designação que aponte para um posto de uma igreja e uma pessoa de outra.
 - Os serviços recebem um contexto de igreja resolvido a partir do vínculo ativo da conta e filtram toda consulta por esse `church_id`. Nenhum identificador vindo do cliente amplia o escopo.
 - Sem vínculo, a API responde 404, inclusive para administradores da plataforma (que cadastram igrejas mas não leem seus dados).
-- Tarefas agendadas e webhooks carregam a igreja explicitamente; o webhook identifica o canal pelo `phone_number_id` e confere a assinatura com o segredo daquele canal.
+- Tarefas agendadas e webhooks carregam a igreja explicitamente. O webhook da Cloud API identifica o canal pelo `phone_number_id`; o do YCloud, pelo número da igreja no evento. Cada número pertence a um só canal (índice único no banco) e a assinatura é conferida com o segredo daquele canal.
 - Testes: `tests/services/tenancy.test.ts` (serviços e restrições do banco) e `tests/e2e/api.spec.ts` / `flows.spec.ts` (HTTP e interface).
 
 ## Contas, senhas e sessões
@@ -20,7 +20,7 @@
 
 ## Segredos
 
-- Tokens de acesso e app secret da Meta ficam cifrados com AES-256-GCM (`SECRETS_ENCRYPTION_KEY`) e nunca voltam para o navegador; o token de verificação do webhook é guardado só como hash.
+- Tokens de acesso e app secret da Meta, e a chave de API e o segredo de webhook do YCloud, ficam cifrados com AES-256-GCM (`SECRETS_ENCRYPTION_KEY`) e nunca voltam para o navegador; o token de verificação do webhook é guardado só como hash.
 - Links de convite e de senha na fila de mensagens ficam cifrados e são apagados após envio real. Em modo de simulação o link continua disponível só para a coordenação, para testes locais.
 - `.env` está no `.gitignore`; o repositório só tem `.env.example`.
 

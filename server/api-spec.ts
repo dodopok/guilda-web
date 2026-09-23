@@ -111,6 +111,7 @@ export const ROUTES: RouteDoc[] = [
   { method: 'put', path: `${C}/whatsapp/coexistence`, summary: 'Registrar comprovação de coexistência com o app WhatsApp Business', auth: 'coordinator', body: coexistenceSchema },
   { method: 'get', path: '/api/v1/webhooks/whatsapp', summary: 'Verificação do webhook pela Meta (hub.challenge)', auth: 'none' },
   { method: 'post', path: '/api/v1/webhooks/whatsapp', summary: 'Estados de entrega e mensagens recebidas (PARAR). Exige X-Hub-Signature-256', auth: 'signature' },
+  { method: 'post', path: '/api/v1/webhooks/ycloud', summary: 'Eventos do YCloud (estados de entrega e PARAR). Exige YCloud-Signature', auth: 'signature' },
   // Liturgia
   { method: 'get', path: `${C}/templates`, summary: 'Modelos de liturgia', auth: 'session' },
   { method: 'post', path: `${C}/templates`, summary: 'Criar modelo', auth: 'coordinator', body: templateSchema },

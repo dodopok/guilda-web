@@ -34,7 +34,7 @@ export interface ChurchInfo {
   church: Church
   me: { personId: string, roles: string[] }
   liturgicalColor: string | null
-  whatsappMode: 'disabled' | 'simulation' | 'cloud_api' | null
+  whatsappMode: 'disabled' | 'simulation' | 'cloud_api' | 'ycloud' | null
 }
 
 export interface Task {

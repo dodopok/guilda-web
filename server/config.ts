@@ -24,6 +24,7 @@ export function getConfig() {
       allowRealSend: bool(env.WHATSAPP_ALLOW_REAL_SEND, false),
       graphBaseUrl: (env.WHATSAPP_GRAPH_BASE_URL ?? 'https://graph.facebook.com').replace(/\/$/, ''),
       graphVersion: env.WHATSAPP_GRAPH_VERSION ?? 'v25.0',
+      ycloudBaseUrl: (env.YCLOUD_API_BASE_URL ?? 'https://api.ycloud.com').replace(/\/$/, ''),
     },
     estevao: {
       url: (env.ESTEVAO_API_URL ?? '').replace(/\/$/, ''),

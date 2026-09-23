@@ -1,9 +1,9 @@
-import { and, desc, eq, inArray, lt, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, lt, ne, or, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { Db } from '../../db/client'
 import { outboundMessages, people, whatsappChannels } from '../../db/schema'
 import { decryptSecret, encryptSecret, hasEncryptionKey, sha256 } from '../../lib/crypto'
-import { badRequest, notFound } from '../../lib/errors'
+import { AppError, badRequest, notFound } from '../../lib/errors'
 import { normalizePhone } from '../../lib/phone'
 import { audit } from '../audit'
 import { type ChurchContext, requireCoordinator } from '../context'
@@ -22,6 +22,7 @@ export async function getChannelConfig(db: Db, ctx: ChurchContext) {
   return {
     mode: c.mode,
     phoneNumberId: c.phoneNumberId,
+    senderPhone: c.senderPhone,
     businessAccountId: c.businessAccountId,
     displayPhoneLast4: c.displayPhoneLast4,
     hasAccessToken: Boolean(c.accessTokenEnc),
@@ -46,11 +47,15 @@ export async function getChannelConfig(db: Db, ctx: ChurchContext) {
 }
 
 export const channelUpdateSchema = z.object({
-  mode: z.enum(['disabled', 'simulation', 'cloud_api']).optional(),
+  mode: z.enum(['disabled', 'simulation', 'cloud_api', 'ycloud']).optional(),
   phoneNumberId: z.string().trim().regex(/^\d{5,30}$/, 'Somente números.').nullable().optional(),
+  // YCloud: número da igreja em E.164, usado como remetente e para identificar os webhooks.
+  senderPhone: z.string().trim().max(30).nullable().optional(),
   businessAccountId: z.string().trim().regex(/^\d{5,30}$/, 'Somente números.').nullable().optional(),
   displayPhoneLast4: z.string().trim().regex(/^\d{4}$/).nullable().optional(),
   // Segredos: só escrita. Nunca são devolvidos pela API.
+  // accessToken é o token da Cloud API ou a chave de API do YCloud; appSecret é o app
+  // secret da Meta ou o segredo do endpoint de webhook do YCloud.
   accessToken: z.string().trim().min(20).max(1000).optional(),
   appSecret: z.string().trim().min(16).max(200).optional(),
   webhookVerifyToken: z.string().trim().min(16).max(200).optional(),
@@ -78,10 +83,33 @@ export async function updateChannel(db: Db, ctx: ChurchContext, input: z.infer<t
     testRecipients = input.testRecipients.map((p) => normalizePhone(p))
       .filter((p): p is string => Boolean(p))
   }
+  let senderPhone: string | null | undefined
+  if (input.senderPhone !== undefined) {
+    senderPhone = input.senderPhone ? normalizePhone(input.senderPhone) : null
+    if (input.senderPhone && !senderPhone) throw badRequest('invalid_sender_phone', 'Número do remetente inválido. Use o formato +55 51 99999-9999.')
+  }
   const current = (await getChannel(db, ctx.church.id))!
+  // Cada número pertence a um só canal: os webhooks encontram a igreja por ele.
+  const phoneNumberId = input.phoneNumberId ?? null
+  if (phoneNumberId || senderPhone) {
+    const taken = await db.select({ churchId: whatsappChannels.churchId }).from(whatsappChannels).where(and(
+      ne(whatsappChannels.churchId, ctx.church.id),
+      or(
+        phoneNumberId ? eq(whatsappChannels.phoneNumberId, phoneNumberId) : undefined,
+        senderPhone ? eq(whatsappChannels.senderPhone, senderPhone) : undefined,
+      ),
+    )).limit(1)
+    if (taken.length) throw new AppError(409, 'phone_in_use', 'Este número já está ligado a outra igreja.')
+  }
+  // Trocar o número ou o provedor real desfaz a comprovação de coexistência.
+  const realModes = ['cloud_api', 'ycloud']
+  const resetsCoexistence = (input.phoneNumberId !== undefined && input.phoneNumberId !== current.phoneNumberId)
+    || (senderPhone !== undefined && senderPhone !== current.senderPhone)
+    || (input.mode !== undefined && realModes.includes(input.mode) && realModes.includes(current.mode) && input.mode !== current.mode)
   await db.update(whatsappChannels).set({
     ...(input.mode ? { mode: input.mode } : {}),
     ...(input.phoneNumberId !== undefined ? { phoneNumberId: input.phoneNumberId } : {}),
+    ...(senderPhone !== undefined ? { senderPhone } : {}),
     ...(input.businessAccountId !== undefined ? { businessAccountId: input.businessAccountId } : {}),
     ...(input.displayPhoneLast4 !== undefined ? { displayPhoneLast4: input.displayPhoneLast4 } : {}),
     ...(input.accessToken ? { accessTokenEnc: encryptSecret(input.accessToken) } : {}),
@@ -90,8 +118,7 @@ export async function updateChannel(db: Db, ctx: ChurchContext, input: z.infer<t
     ...(input.testMode !== undefined ? { testMode: input.testMode } : {}),
     ...(testRecipients ? { testRecipients } : {}),
     ...(input.templates ? { templates: { ...current.templates, ...input.templates } } : {}),
-    // Trocar o número desfaz a comprovação de coexistência.
-    ...(input.phoneNumberId !== undefined && input.phoneNumberId !== current.phoneNumberId
+    ...(resetsCoexistence
       ? { coexistenceStatus: 'not_verified', coexistenceVerifiedAt: null, coexistenceNote: null }
       : {}),
     updatedAt: new Date(),
@@ -112,7 +139,8 @@ export const coexistenceSchema = z.object({
 export async function setCoexistence(db: Db, ctx: ChurchContext, input: z.infer<typeof coexistenceSchema>) {
   requireCoordinator(ctx)
   const channel = await getChannel(db, ctx.church.id)
-  if (!channel?.phoneNumberId && input.status === 'verified') throw badRequest('missing_phone_number_id', 'Informe o identificador do número antes de registrar a comprovação.')
+  const hasNumber = channel?.mode === 'ycloud' ? Boolean(channel.senderPhone) : Boolean(channel?.phoneNumberId)
+  if (!hasNumber && input.status === 'verified') throw badRequest('missing_phone_number_id', 'Informe o número do canal antes de registrar a comprovação.')
   await db.update(whatsappChannels).set({
     coexistenceStatus: input.status,
     coexistenceNote: input.note,

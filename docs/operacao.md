@@ -23,6 +23,7 @@ Todas estão em [.env.example](../.env.example). Em produção:
 | `PASSWORD_SCRYPT_LOG2N` | não (17) | Custo do scrypt. O custo fica gravado em cada hash |
 | `WHATSAPP_ALLOW_REAL_SEND` | não (false) | Trava global: sem `true`, nenhum envio real acontece em nenhuma igreja |
 | `WHATSAPP_GRAPH_VERSION` | não (v25.0) | Versão da Graph API |
+| `YCLOUD_API_BASE_URL` | não (https://api.ycloud.com) | Endereço da API do YCloud |
 | `ESTEVAO_API_URL`, `ESTEVAO_API_KEY` | não | Sem elas, o roteiro funciona com preenchimento manual |
 | `WORKER_INTERVAL_SECONDS` | não (30) | |
 | `REMINDER_CATCHUP_HOURS` | não (6) | Atraso máximo para disparar um lembrete perdido (trabalhador parado). Depois disso, a semana é pulada em vez de mandar lembrete fora de hora |
@@ -57,9 +58,9 @@ Estados na tela Mensagens:
 | --- | --- | --- |
 | Não enviada (`blocked`) | Sem telefone, sem consentimento, canal desativado ou requisito do canal oficial pendente. O motivo aparece na linha | Corrigir o motivo e usar "Tentar de novo" |
 | Na fila | Aguardando o trabalhador | Verificar se o trabalhador está rodando |
-| Falhou | A Meta recusou (erro definitivo) ou esgotou 5 tentativas com espera crescente | Ler o erro; "Reenviar" |
+| Falhou | O provedor (YCloud ou Meta) recusou (erro definitivo) ou esgotou 5 tentativas com espera crescente | Ler o erro; "Reenviar" |
 | Incerta (`unknown`) | O processo caiu durante a chamada à Meta; pode ter sido entregue | Conferir com a pessoa antes de reenviar |
 | Simulada — não enviada | Modo de simulação | Nada: ninguém recebeu |
-| Enviada / Entregue / Lida | Confirmado pela Meta (webhook) | — |
+| Enviada / Entregue / Lida | Confirmado pelo provedor (webhook) | — |
 
 Reenviar reaproveita a mesma mensagem (mesma chave de idempotência) e nunca altera a escala.

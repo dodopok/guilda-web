@@ -6,8 +6,9 @@ const toast = useToast()
 
 interface TemplateRow { kind: string, label: string, defaultName: string, body: string, params: string[], name: string, language: string, status: string }
 interface Channel {
-  mode: 'disabled' | 'simulation' | 'cloud_api'
+  mode: 'disabled' | 'simulation' | 'cloud_api' | 'ycloud'
   phoneNumberId: string | null
+  senderPhone: string | null
   businessAccountId: string | null
   displayPhoneLast4: string | null
   hasAccessToken: boolean
@@ -22,30 +23,32 @@ interface Channel {
 }
 const { data, refresh } = await useAsyncData(`wa-${route.params.slug}`, () => capi<Channel>('/whatsapp'))
 
-const form = reactive({ phoneNumberId: '', businessAccountId: '', displayPhoneLast4: '', accessToken: '', appSecret: '', webhookVerifyToken: '', testMode: true, testRecipients: '' })
+const form = reactive({ phoneNumberId: '', senderPhone: '', businessAccountId: '', displayPhoneLast4: '', accessToken: '', appSecret: '', webhookVerifyToken: '', testMode: true, testRecipients: '' })
 watchEffect(() => {
   const c = data.value
   if (!c) return
-  Object.assign(form, { phoneNumberId: c.phoneNumberId ?? '', businessAccountId: c.businessAccountId ?? '', displayPhoneLast4: c.displayPhoneLast4 ?? '', testMode: c.testMode, testRecipients: c.testRecipients.join('\n'), accessToken: '', appSecret: '', webhookVerifyToken: '' })
+  Object.assign(form, { phoneNumberId: c.phoneNumberId ?? '', senderPhone: c.senderPhone ?? '', businessAccountId: c.businessAccountId ?? '', displayPhoneLast4: c.displayPhoneLast4 ?? '', testMode: c.testMode, testRecipients: c.testRecipients.join('\n'), accessToken: '', appSecret: '', webhookVerifyToken: '' })
 })
 async function patch(body: Record<string, unknown>, msg = 'Configuração salva.') {
   try {
     await capi('/whatsapp', { method: 'PATCH', body })
     toast.ok(msg)
     await refresh()
-    if (info.value && 'mode' in body) info.value.whatsappMode = body.mode as 'simulation'
+    if (info.value && 'mode' in body) info.value.whatsappMode = body.mode as Channel['mode']
   } catch (e) {
     toast.error(e)
   }
 }
+// O formulário de credenciais segue o provedor escolhido; sem provedor real, mostra o YCloud.
+const provider = computed<'ycloud' | 'cloud_api'>(() => (data.value?.mode === 'cloud_api' ? 'cloud_api' : 'ycloud'))
 async function saveCredentials() {
-  const body: Record<string, unknown> = {
-    phoneNumberId: form.phoneNumberId || null,
-    businessAccountId: form.businessAccountId || null,
-    displayPhoneLast4: form.displayPhoneLast4 || null,
+  const body: Record<string, unknown> = provider.value === 'ycloud'
+    ? { senderPhone: form.senderPhone || null }
+    : { phoneNumberId: form.phoneNumberId || null, businessAccountId: form.businessAccountId || null, displayPhoneLast4: form.displayPhoneLast4 || null }
+  Object.assign(body, {
     testMode: form.testMode,
     testRecipients: form.testRecipients.split(/[\n,]/).map((x) => x.trim()).filter(Boolean),
-  }
+  })
   if (form.accessToken) body.accessToken = form.accessToken
   if (form.appSecret) body.appSecret = form.appSecret
   if (form.webhookVerifyToken) body.webhookVerifyToken = form.webhookVerifyToken
@@ -65,14 +68,18 @@ async function setCoex(status: 'verified' | 'not_verified') {
 async function setTemplate(t: TemplateRow, patchT: Partial<TemplateRow>) {
   await patch({ templates: { [t.kind]: { name: patchT.name ?? t.name, language: patchT.language ?? t.language, status: patchT.status ?? (t.status === 'not_submitted' ? 'not_submitted' : t.status) } } }, 'Modelo atualizado.')
 }
-const webhookUrl = computed(() => (import.meta.client ? `${window.location.origin}/api/v1/webhooks/whatsapp` : '/api/v1/webhooks/whatsapp'))
+const webhookUrl = computed(() => {
+  const path = `/api/v1/webhooks/${provider.value === 'ycloud' ? 'ycloud' : 'whatsapp'}`
+  return import.meta.client ? `${window.location.origin}${path}` : path
+})
 const checks = computed(() => {
   const c = data.value
   if (!c) return []
+  const y = provider.value === 'ycloud'
   return [
-    { ok: c.mode === 'cloud_api', text: 'Canal oficial (Cloud API) escolhido para esta igreja' },
-    { ok: c.readiness.hasCredentials, text: 'Identificador do número e token de acesso cadastrados' },
-    { ok: c.readiness.hasWebhookSecret, text: 'App secret cadastrado (confere a assinatura dos webhooks)' },
+    { ok: c.mode === 'cloud_api' || c.mode === 'ycloud', text: 'Canal oficial escolhido para esta igreja (YCloud ou Cloud API)' },
+    { ok: c.readiness.hasCredentials, text: y ? 'Número da igreja e chave de API do YCloud cadastrados' : 'Identificador do número e token de acesso cadastrados' },
+    { ok: c.readiness.hasWebhookSecret, text: y ? 'Segredo do webhook do YCloud cadastrado (confere a assinatura dos eventos)' : 'App secret cadastrado (confere a assinatura dos webhooks)' },
     { ok: c.readiness.coexistenceVerified, text: 'Coexistência comprovada: o número continua funcionando no aplicativo WhatsApp Business' },
     { ok: c.readiness.approvedTemplates.includes('weekly_reminder'), text: 'Modelo do lembrete semanal aprovado na Meta' },
     { ok: c.readiness.realSendAllowedByServer, text: 'Envio real liberado no servidor (WHATSAPP_ALLOW_REAL_SEND=true)' },
@@ -85,7 +92,7 @@ async function copy(text: string) {
 function varList(params: string[]) {
   return params.map((p, i) => `${'{'.repeat(2)}${i + 1}${'}'.repeat(2)} ${p}`).join(' · ')
 }
-const TSTATUS: Record<string, string> = { not_submitted: 'Não enviado à Meta', pending: 'Em análise', approved: 'Aprovado', rejected: 'Rejeitado' }
+const TSTATUS: Record<string, string> = { not_submitted: 'Não enviado', pending: 'Em análise', approved: 'Aprovado', rejected: 'Rejeitado' }
 </script>
 
 <template>
@@ -130,12 +137,21 @@ const TSTATUS: Record<string, string> = { not_submitted: 'Não enviado à Meta',
             <label class="check"><input
               type="radio"
               name="mode"
-              :checked="data.mode === 'cloud_api'"
-              @change="patch({ mode: 'cloud_api' })"
-            ><span class="check__text"><strong>Canal oficial (WhatsApp Cloud API)</strong><span
+              :checked="data.mode === 'ycloud'"
+              @change="patch({ mode: 'ycloud' })"
+            ><span class="check__text"><strong>Canal oficial pelo YCloud</strong><span
               class="small muted"
               style="display:block"
-            >Envio real, somente quando todos os itens abaixo estiverem cumpridos.</span></span></label>
+            >Número conectado no YCloud por coexistência. Envio real só quando todos os itens ao lado estiverem cumpridos.</span></span></label>
+            <label class="check"><input
+              type="radio"
+              name="mode"
+              :checked="data.mode === 'cloud_api'"
+              @change="patch({ mode: 'cloud_api' })"
+            ><span class="check__text"><strong>Canal oficial direto na Meta (Cloud API)</strong><span
+              class="small muted"
+              style="display:block"
+            >Para quem tem app próprio na Meta. Mesmas exigências para o envio real.</span></span></label>
           </div>
         </fieldset>
       </section>
@@ -157,57 +173,91 @@ const TSTATUS: Record<string, string> = { not_submitted: 'Não enviado à Meta',
               style="margin-top:1rem"
               @submit.prevent="saveCredentials"
             >
-              <div class="fields-2">
-                <label class="field"><span class="field__label">Phone number ID</span><input
-                  v-model="form.phoneNumberId"
+              <template v-if="provider === 'ycloud'">
+                <label class="field"><span class="field__label">Número da igreja no WhatsApp</span><input
+                  v-model="form.senderPhone"
                   class="input"
-                  inputmode="numeric"
+                  type="tel"
                   autocomplete="off"
-                ></label>
-                <label class="field"><span class="field__label">WhatsApp Business Account ID</span><input
-                  v-model="form.businessAccountId"
+                  placeholder="+55 51 99999-9999"
+                ><span class="field__hint">O mesmo número conectado no YCloud. As mensagens saem dele.</span></label>
+                <label class="field"><span class="field__label">Chave de API do YCloud</span><input
+                  v-model="form.accessToken"
                   class="input"
-                  inputmode="numeric"
+                  type="password"
                   autocomplete="off"
+                  :placeholder="data.hasAccessToken ? 'Guardada — preencha só para trocar' : 'Em Developers → API Keys, no painel do YCloud'"
                 ></label>
-              </div>
-              <label class="field"><span class="field__label">Últimos 4 dígitos do número (para exibição)</span><input
-                v-model="form.displayPhoneLast4"
-                class="input"
-                style="max-width:8rem"
-                inputmode="numeric"
-                maxlength="4"
-              ></label>
-              <label class="field"><span class="field__label">Token de acesso</span><input
-                v-model="form.accessToken"
-                class="input"
-                type="password"
-                autocomplete="off"
-                :placeholder="data.hasAccessToken ? 'Guardado — preencha só para trocar' : 'Cole o token do usuário do sistema'"
-              ></label>
-              <label class="field"><span class="field__label">App secret</span><input
-                v-model="form.appSecret"
-                class="input"
-                type="password"
-                autocomplete="off"
-                :placeholder="data.hasAppSecret ? 'Guardado — preencha só para trocar' : ''"
-              ></label>
-              <label class="field"><span class="field__label">Token de verificação do webhook</span><input
-                v-model="form.webhookVerifyToken"
-                class="input"
-                type="password"
-                autocomplete="off"
-                :placeholder="data.hasWebhookVerifyToken ? 'Guardado — preencha só para trocar' : 'Invente um texto longo e use o mesmo na Meta'"
-              ></label>
-              <p class="field__hint">
-                URL do webhook para cadastrar na Meta: <code>{{ webhookUrl }}</code> <button
-                  type="button"
-                  class="btn btn--quiet btn--small"
-                  @click="copy(webhookUrl)"
-                >
-                  Copiar
-                </button>
-              </p>
+                <label class="field"><span class="field__label">Segredo do webhook</span><input
+                  v-model="form.appSecret"
+                  class="input"
+                  type="password"
+                  autocomplete="off"
+                  :placeholder="data.hasAppSecret ? 'Guardado — preencha só para trocar' : 'Mostrado ao criar o endpoint de webhook no YCloud'"
+                ></label>
+                <p class="field__hint">
+                  URL do webhook para cadastrar no YCloud (eventos <code>whatsapp.message.updated</code> e <code>whatsapp.inbound_message.received</code>): <code>{{ webhookUrl }}</code> <button
+                    type="button"
+                    class="btn btn--quiet btn--small"
+                    @click="copy(webhookUrl)"
+                  >
+                    Copiar
+                  </button>
+                </p>
+              </template>
+              <template v-else>
+                <div class="fields-2">
+                  <label class="field"><span class="field__label">Phone number ID</span><input
+                    v-model="form.phoneNumberId"
+                    class="input"
+                    inputmode="numeric"
+                    autocomplete="off"
+                  ></label>
+                  <label class="field"><span class="field__label">WhatsApp Business Account ID</span><input
+                    v-model="form.businessAccountId"
+                    class="input"
+                    inputmode="numeric"
+                    autocomplete="off"
+                  ></label>
+                </div>
+                <label class="field"><span class="field__label">Últimos 4 dígitos do número (para exibição)</span><input
+                  v-model="form.displayPhoneLast4"
+                  class="input"
+                  style="max-width:8rem"
+                  inputmode="numeric"
+                  maxlength="4"
+                ></label>
+                <label class="field"><span class="field__label">Token de acesso</span><input
+                  v-model="form.accessToken"
+                  class="input"
+                  type="password"
+                  autocomplete="off"
+                  :placeholder="data.hasAccessToken ? 'Guardado — preencha só para trocar' : 'Cole o token do usuário do sistema'"
+                ></label>
+                <label class="field"><span class="field__label">App secret</span><input
+                  v-model="form.appSecret"
+                  class="input"
+                  type="password"
+                  autocomplete="off"
+                  :placeholder="data.hasAppSecret ? 'Guardado — preencha só para trocar' : ''"
+                ></label>
+                <label class="field"><span class="field__label">Token de verificação do webhook</span><input
+                  v-model="form.webhookVerifyToken"
+                  class="input"
+                  type="password"
+                  autocomplete="off"
+                  :placeholder="data.hasWebhookVerifyToken ? 'Guardado — preencha só para trocar' : 'Invente um texto longo e use o mesmo na Meta'"
+                ></label>
+                <p class="field__hint">
+                  URL do webhook para cadastrar na Meta: <code>{{ webhookUrl }}</code> <button
+                    type="button"
+                    class="btn btn--quiet btn--small"
+                    @click="copy(webhookUrl)"
+                  >
+                    Copiar
+                  </button>
+                </p>
+              </template>
               <label
                 class="check"
                 style="margin-top:1rem"
@@ -249,7 +299,7 @@ const TSTATUS: Record<string, string> = { not_submitted: 'Não enviado à Meta',
               class="ink-2"
               style="margin-top:.75rem"
             >
-              Cadastre estes textos na Meta como modelos da categoria “utilidade”, em português, e marque aqui quando forem aprovados.
+              Cadastre estes textos como modelos da categoria “utilidade”, em português ({{ provider === 'ycloud' ? 'no YCloud, em WhatsApp → Templates' : 'no gerenciador da Meta' }}), com o mesmo nome, e marque aqui quando forem aprovados.
             </p>
             <ul
               class="lines"
@@ -339,7 +389,7 @@ const TSTATUS: Record<string, string> = { not_submitted: 'Não enviado à Meta',
             class="small"
             style="margin-top:.6rem"
           >
-            O número atual precisa continuar funcionando no aplicativo WhatsApp Business. Pela documentação da Meta, isso exige o fluxo de integração de usuários do aplicativo (Embedded Signup, via Tech Provider ou Solution Partner). Não conecte o número de outra forma: a migração comum desativa o aplicativo.
+            O número atual precisa continuar funcionando no aplicativo WhatsApp Business. Isso exige a conexão por coexistência (no YCloud, “conectar número já usado no aplicativo WhatsApp Business”). Não conecte o número de outra forma: a migração comum desativa o aplicativo. Antes de registrar, envie uma mensagem de teste e confirme que o aplicativo continua recebendo e enviando no mesmo número.
           </p>
           <p
             v-if="data.coexistence.status === 'verified'"
@@ -355,7 +405,7 @@ const TSTATUS: Record<string, string> = { not_submitted: 'Não enviado à Meta',
             v-model="coex.note"
             class="textarea"
             style="min-height:4.5rem"
-            placeholder="Ex.: após o Embedded Signup, enviamos pela API e respondemos pelo aplicativo no mesmo número em 12/10."
+            placeholder="Ex.: em 12/10, após conectar por coexistência, enviamos uma mensagem de teste pela Guilda e respondemos pelo aplicativo no mesmo número."
           /></label>
           <div class="row">
             <button

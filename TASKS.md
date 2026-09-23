@@ -76,7 +76,8 @@ Legenda: [x] feito e testado · [~] implementado, depende de validação externa
 
 - [x] Canal por igreja, consentimento, modelos, fila, reenvio controlado, estados de entrega, webhook assinado, PARAR
 - [x] Modo de simulação local claramente identificado; canal oficial nunca cai na simulação
-- [~] Coexistência do número atual de Porto com o aplicativo WhatsApp Business (Embedded Signup via Tech Provider)
+- [x] Provedor YCloud (envio direto com `X-API-Key`, webhook `YCloud-Signature`) além da Cloud API direta, com as mesmas travas; testado por contrato
+- [~] Número de Porto conectado no YCloud (feito pela coordenação); falta cadastrar as credenciais na tela do canal e registrar a comprovação de coexistência
 - [~] Aprovação dos modelos, envio de teste real, webhooks públicos, custos
 
 ## Qualidade
@@ -89,7 +90,7 @@ Legenda: [x] feito e testado · [~] implementado, depende de validação externa
 
 ## Depende de acesso externo
 
-1. Administração do portfólio da Meta e do número de Porto; caminho de Tech Provider/Solution Partner para o Embedded Signup com coexistência.
+1. Na tela do canal: número, chave de API e segredo do webhook do YCloud; cadastrar a URL do webhook no YCloud; comprovar a coexistência com um envio de teste.
 2. Aprovação dos modelos em `docs/integracoes.md` / tela do canal.
 3. Número de teste que autorizou receber mensagens.
 4. URL e chave de desenvolvimento do Estêvão (`ESTEVAO_API_URL`, `ESTEVAO_API_KEY`).

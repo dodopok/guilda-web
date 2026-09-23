@@ -1,6 +1,29 @@
 # Integrações
 
-## WhatsApp (Cloud API oficial)
+## WhatsApp pelo YCloud (provedor escolhido para Porto)
+
+O YCloud é parceiro oficial da Meta, conecta um número que já está no aplicativo WhatsApp Business por **coexistência** e repassa o custo das mensagens da Meta sem margem no plano gratuito. Na Guilda ele é um modo do canal (`ycloud`), ao lado da Cloud API direta, e passa pelas **mesmas travas**: consentimento, `WHATSAPP_ALLOW_REAL_SEND=true`, credenciais completas, coexistência registrada, modelo aprovado e, em modo de teste, só números da lista.
+
+### Contrato (conferido na documentação do YCloud em 23/09/2026)
+
+- **Envio**: `POST {YCLOUD_API_BASE_URL}/v2/whatsapp/messages/sendDirectly` com cabeçalho `X-API-Key`. Corpo: `from` (número da igreja em E.164), `to` (E.164), `type: "template"`, `template` no mesmo formato da Cloud API e `externalId` com o id da mensagem na fila da Guilda. A resposta traz `id` (guardado como identificador do provedor) e `status`; `status: "failed"` com 200 é tratado como falha (temporária quando `whatsappApiError.is_transient`). HTTP 5xx e 429 voltam para a fila com espera crescente.
+- **Webhook**: `POST /api/v1/webhooks/ycloud`. Cabeçalho `YCloud-Signature: t={unix},s={hex}` com `s = HMAC-SHA256(segredo do endpoint, "{t}.{corpo bruto}")`; a Guilda recusa assinatura errada e horário com mais de 5 minutos de diferença. Eventos usados: `whatsapp.message.updated` (`whatsappMessage.id`, `status` sent/delivered/read/failed, `errorCode`, `errorMessage`, horários) e `whatsapp.inbound_message.received` (`whatsappInboundMessage.from`, `to`, `text.body`), para PARAR. O canal é achado pelo número da igreja (`whatsappMessage.from` ou `whatsappInboundMessage.to`); cada número só pode estar em uma igreja. O `id` do evento evita processamento duplicado.
+
+### Como ligar (coordenação)
+
+1. No YCloud: criar a chave em *Developers → API Keys*; criar o endpoint de webhook com a URL mostrada na tela "Canal do WhatsApp" e os dois eventos acima; guardar o segredo do endpoint.
+2. Na Guilda, tela "Canal do WhatsApp": escolher "Canal oficial pelo YCloud", informar o número, a chave e o segredo (ficam cifrados e nunca voltam ao navegador). Deixar o **modo de teste** ligado com um ou dois números de quem autorizou.
+3. Cadastrar os modelos no YCloud (*WhatsApp → Templates*) com os nomes e textos da tela, categoria utilidade, português; marcar como aprovados na Guilda quando a Meta aprovar.
+4. Com `WHATSAPP_ALLOW_REAL_SEND=true` no servidor, enviar um lembrete de teste, conferir que chegou e que o aplicativo WhatsApp Business continua enviando e recebendo no mesmo número; então registrar a comprovação de coexistência.
+5. Só depois desligar o modo de teste.
+
+### Não validado
+
+1. Envio real pelo YCloud e chegada dos webhooks (sem credenciais nesta implementação; testado por contrato em `tests/services/whatsapp.test.ts`).
+2. Formato exato do corpo de erro HTTP do YCloud: a leitura é tolerante (`error.code`, `error.message`, `error.whatsappApiError`) e cai no código HTTP.
+3. Se o YCloud envia `whatsappMessage.from` em todos os eventos de estado (a documentação mostra o objeto `WhatsappMessage` completo); se não enviar, o evento é recusado com 401 e aparece nos registros do YCloud.
+
+## WhatsApp (Cloud API direta)
 
 ### O que está implementado
 

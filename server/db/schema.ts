@@ -402,11 +402,14 @@ export const unavailabilities = pgTable('unavailabilities', {
 
 export const whatsappChannels = pgTable('whatsapp_channels', {
   churchId: uuid('church_id').primaryKey().references(() => churches.id, { onDelete: 'cascade' }),
-  // disabled | simulation | cloud_api
+  // disabled | simulation | cloud_api | ycloud
   mode: text('mode').notNull().default('disabled'),
   phoneNumberId: text('phone_number_id'),
+  // Número remetente em E.164 (usado pelo YCloud, que identifica o canal pelo número).
+  senderPhone: text('sender_phone'),
   businessAccountId: text('business_account_id'),
   displayPhoneLast4: text('display_phone_last4'),
+  // Cloud API: token de acesso e app secret. YCloud: chave de API e segredo do webhook.
   accessTokenEnc: text('access_token_enc'),
   appSecretEnc: text('app_secret_enc'),
   webhookVerifyTokenHash: text('webhook_verify_token_hash'),
@@ -421,7 +424,11 @@ export const whatsappChannels = pgTable('whatsapp_channels', {
   // Modelos aprovados na Meta por tipo de mensagem: { kind: { name, language, status } }.
   templates: jsonb('templates').$type<Record<string, { name: string, language: string, status: string }>>().notNull().default({}),
   updatedAt: ts('updated_at').notNull().defaultNow(),
-})
+}, (t) => [
+  // Os webhooks acham a igreja pelo número: cada número pertence a um só canal.
+  uniqueIndex('whatsapp_channels_phone_number_id_uq').on(t.phoneNumberId).where(sql`${t.phoneNumberId} is not null`),
+  uniqueIndex('whatsapp_channels_sender_phone_uq').on(t.senderPhone).where(sql`${t.senderPhone} is not null`),
+])
 
 export const outboundMessages = pgTable('outbound_messages', {
   id: uuid('id').primaryKey().defaultRandom(),

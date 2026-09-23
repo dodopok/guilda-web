@@ -6,7 +6,7 @@ Escalas, confirmações, lembretes pelo WhatsApp e roteiros de culto para igreja
 - API HTTP versionada em `/api/v1` (Nitro, TypeScript), pronta para um futuro app Flutter — ver [docs/api.md](docs/api.md) e [docs/openapi.json](docs/openapi.json).
 - PostgreSQL com migrações (Drizzle).
 - Trabalhador separado para tarefas agendadas: pedido mensal de indisponibilidades, lembrete semanal, correções depois do lembrete e fila de mensagens.
-- WhatsApp pela Cloud API oficial, com **modo de simulação local claramente identificado**. Nenhuma mensagem real sai sem canal configurado, coexistência comprovada, modelo aprovado, consentimento da pessoa e `WHATSAPP_ALLOW_REAL_SEND=true`.
+- WhatsApp oficial pelo YCloud (parceiro da Meta, com coexistência) ou direto pela Cloud API, com **modo de simulação local claramente identificado**. Nenhuma mensagem real sai sem canal configurado, coexistência comprovada, modelo aprovado, consentimento da pessoa e `WHATSAPP_ALLOW_REAL_SEND=true`.
 
 ## Rodar localmente
 
@@ -69,7 +69,7 @@ Os testes de ponta a ponta recriam o banco `guilda_e2e`, sobem o build na porta 
 | `app/` | Telas Vue: participante (`/i/:igreja`) e coordenação (`/i/:igreja/coordenacao`) |
 | `server/api/v1/` | Rotas HTTP (finas: validam e chamam os serviços) |
 | `server/services/` | Regras de negócio, sem dependência do Nuxt (usadas também pelo trabalhador e pelos testes) |
-| `server/integrations/` | Clientes da WhatsApp Cloud API e do Estêvão |
+| `server/integrations/` | Clientes do YCloud, da WhatsApp Cloud API e do Estêvão |
 | `server/db/` | Esquema Drizzle e migrações SQL |
 | `worker/` | Processo do trabalhador |
 | `scripts/` | Migração, dados fictícios, OpenAPI, Estêvão simulado |

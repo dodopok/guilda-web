@@ -8,6 +8,13 @@
       "when": 1790123026977,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1790138624974,
+      "tag": "0001_ycloud_channel",
+      "breakpoints": true
     }
   ]
 }

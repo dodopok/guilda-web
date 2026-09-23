@@ -5,6 +5,7 @@ import type { Db } from '../../db/client'
 import { outboundMessages } from '../../db/schema'
 import { decryptSecret } from '../../lib/crypto'
 import { ProviderError, sendTemplateMessage } from '../../integrations/whatsapp-cloud'
+import { sendYCloudTemplate } from '../../integrations/ycloud'
 import { type OutboundMessage, type WhatsappChannel, getChannel, hasConsent } from './outbox'
 import { type MessageKind, TEMPLATES } from './templates'
 
@@ -13,40 +14,50 @@ import { type MessageKind, TEMPLATES } from './templates'
 export type Route
   = | { kind: 'simulation' }
     | { kind: 'cloud_api', phoneNumberId: string, accessToken: string, templateName: string, language: string }
+    | { kind: 'ycloud', from: string, apiKey: string, templateName: string, language: string }
     | { kind: 'blocked', reason: string }
+
+export const REAL_MODES = ['cloud_api', 'ycloud'] as const
+
+// Credenciais mínimas de cada provedor: Cloud API identifica o número pelo phone number ID;
+// o YCloud, pelo número remetente em E.164. Nos dois, o token/chave fica em accessTokenEnc.
+function hasCredentials(channel: WhatsappChannel | null) {
+  if (!channel?.accessTokenEnc) return false
+  return channel.mode === 'ycloud' ? Boolean(channel.senderPhone) : Boolean(channel.phoneNumberId)
+}
 
 export function channelReadiness(channel: WhatsappChannel | null) {
   const cfg = getConfig()
   const checks = {
     mode: channel?.mode ?? 'disabled',
     realSendAllowedByServer: cfg.whatsapp.allowRealSend,
-    hasCredentials: Boolean(channel?.phoneNumberId && channel?.accessTokenEnc),
+    hasCredentials: hasCredentials(channel),
     hasWebhookSecret: Boolean(channel?.appSecretEnc),
     coexistenceVerified: channel?.coexistenceStatus === 'verified',
     testMode: channel?.testMode ?? true,
     approvedTemplates: Object.entries(channel?.templates ?? {}).filter(([, t]) => t.status === 'approved').map(([k]) => k),
   }
-  const canSendReal = checks.mode === 'cloud_api' && checks.realSendAllowedByServer && checks.hasCredentials && checks.coexistenceVerified
+  const canSendReal = (REAL_MODES as readonly string[]).includes(checks.mode) && checks.realSendAllowedByServer && checks.hasCredentials && checks.coexistenceVerified
   return { ...checks, canSendReal }
 }
 
 export function routeFor(channel: WhatsappChannel | null, kind: MessageKind, toPhone: string): Route {
   if (!channel || channel.mode === 'disabled') return { kind: 'blocked', reason: 'channel_disabled' }
   if (channel.mode === 'simulation') return { kind: 'simulation' }
+  if (!(REAL_MODES as readonly string[]).includes(channel.mode)) return { kind: 'blocked', reason: 'channel_disabled' }
   const cfg = getConfig()
   if (!cfg.whatsapp.allowRealSend) return { kind: 'blocked', reason: 'real_send_disabled' }
-  if (!channel.phoneNumberId || !channel.accessTokenEnc) return { kind: 'blocked', reason: 'missing_credentials' }
+  if (!hasCredentials(channel)) return { kind: 'blocked', reason: 'missing_credentials' }
   if (channel.coexistenceStatus !== 'verified') return { kind: 'blocked', reason: 'coexistence_not_verified' }
   const template = channel.templates[kind]
   if (!template || template.status !== 'approved') return { kind: 'blocked', reason: 'template_not_approved' }
   if (channel.testMode && !channel.testRecipients.includes(toPhone)) return { kind: 'blocked', reason: 'not_test_recipient' }
-  return {
-    kind: 'cloud_api',
-    phoneNumberId: channel.phoneNumberId,
-    accessToken: decryptSecret(channel.accessTokenEnc),
-    templateName: template.name || TEMPLATES[kind].defaultName,
-    language: template.language || 'pt_BR',
+  const templateName = template.name || TEMPLATES[kind].defaultName
+  const language = template.language || 'pt_BR'
+  if (channel.mode === 'ycloud') {
+    return { kind: 'ycloud', from: channel.senderPhone!, apiKey: decryptSecret(channel.accessTokenEnc!), templateName, language }
   }
+  return { kind: 'cloud_api', phoneNumberId: channel.phoneNumberId!, accessToken: decryptSecret(channel.accessTokenEnc!), templateName, language }
 }
 
 const BACKOFF_MINUTES = [1, 5, 15, 60]
@@ -118,17 +129,21 @@ async function processOne(db: Db, msg: OutboundMessage, now: Date, wa: ReturnTyp
     return
   }
 
+  const send = { to: msg.toPhone, templateName: route.templateName, language: route.language, params }
   try {
-    const { providerMessageId } = await sendTemplateMessage({
-      baseUrl: wa.graphBaseUrl,
-      version: wa.graphVersion,
-      phoneNumberId: route.phoneNumberId,
-      accessToken: route.accessToken,
-      fetchImpl,
-    }, { to: msg.toPhone, templateName: route.templateName, language: route.language, params })
+    // O id da mensagem na fila vai como externalId no YCloud para rastrear nos webhooks.
+    const { providerMessageId } = route.kind === 'ycloud'
+      ? await sendYCloudTemplate({ baseUrl: wa.ycloudBaseUrl, apiKey: route.apiKey, from: route.from, fetchImpl }, send, msg.id)
+      : await sendTemplateMessage({
+          baseUrl: wa.graphBaseUrl,
+          version: wa.graphVersion,
+          phoneNumberId: route.phoneNumberId,
+          accessToken: route.accessToken,
+          fetchImpl,
+        }, send)
     await finish(db, msg.id, {
       status: 'sent',
-      provider: 'cloud_api',
+      provider: route.kind,
       providerMessageId,
       sentAt: now,
       secretParamsEnc: null,
@@ -140,9 +155,9 @@ async function processOne(db: Db, msg: OutboundMessage, now: Date, wa: ReturnTyp
     const message = (err as Error).message.slice(0, 500)
     if (retryable && msg.attempts < MAX_ATTEMPTS) {
       const minutes = BACKOFF_MINUTES[Math.min(msg.attempts - 1, BACKOFF_MINUTES.length - 1)]!
-      await finish(db, msg.id, { status: 'queued', provider: 'cloud_api', lastError: message, nextAttemptAt: new Date(now.getTime() + minutes * 60_000) })
+      await finish(db, msg.id, { status: 'queued', provider: route.kind, lastError: message, nextAttemptAt: new Date(now.getTime() + minutes * 60_000) })
     } else {
-      await finish(db, msg.id, { status: 'failed', provider: 'cloud_api', lastError: message, nextAttemptAt: null })
+      await finish(db, msg.id, { status: 'failed', provider: route.kind, lastError: message, nextAttemptAt: null })
     }
   }
 }

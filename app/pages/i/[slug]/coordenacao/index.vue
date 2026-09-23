@@ -60,7 +60,7 @@ const setup = computed<Step[]>(() => {
     { done: c.qualifiedPeople >= 3, title: 'Pessoas e habilitações', detail: `${c.people} pessoas, ${c.qualifiedPeople} com alguma função.`, action: { label: 'Pessoas', to: link('/coordenacao/pessoas') } },
     { done: c.withConsent > 0 && c.withConsent >= c.withPhone * 0.5, title: 'Telefones e consentimento', detail: `${c.withPhone} com telefone, ${c.withConsent} autorizaram mensagens.`, action: { label: 'Registrar', to: link('/coordenacao/pessoas?filtro=sem-consentimento') } },
     { done: c.withAccount >= c.people * 0.5, title: 'Convites de acesso', detail: `${c.withAccount} de ${c.people} já criaram senha.`, action: { label: 'Convidar', to: link('/coordenacao/pessoas?filtro=sem-acesso') } },
-    { done: data.value!.whatsapp.mode !== 'disabled', title: 'Canal do WhatsApp', detail: data.value!.whatsapp.mode === 'cloud_api' ? 'Canal oficial configurado.' : data.value!.whatsapp.mode === 'simulation' ? 'Em simulação: mensagens não saem do servidor.' : 'Desativado.', action: { label: 'Canal', to: link('/coordenacao/whatsapp') } },
+    { done: data.value!.whatsapp.mode !== 'disabled', title: 'Canal do WhatsApp', detail: data.value!.whatsapp.mode === 'cloud_api' ? 'Canal oficial (Cloud API) configurado.' : data.value!.whatsapp.mode === 'ycloud' ? 'Canal oficial pelo YCloud configurado.' : data.value!.whatsapp.mode === 'simulation' ? 'Em simulação: mensagens não saem do servidor.' : 'Desativado.', action: { label: 'Canal', to: link('/coordenacao/whatsapp') } },
     { done: c.templates > 0, title: 'Modelos de liturgia', detail: `${c.templates} modelos.`, action: { label: 'Modelos', to: link('/coordenacao/modelos') } },
   ]
 })

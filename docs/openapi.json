@@ -8075,7 +8075,8 @@
                     "enum": [
                       "disabled",
                       "simulation",
-                      "cloud_api"
+                      "cloud_api",
+                      "ycloud"
                     ]
                   },
                   "phoneNumberId": {
@@ -8083,6 +8084,17 @@
                       {
                         "type": "string",
                         "pattern": "^\\d{5,30}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "senderPhone": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 30
                       },
                       {
                         "type": "null"
@@ -8433,6 +8445,79 @@
       },
       "post": {
         "summary": "Estados de entrega e mensagens recebidas (PARAR). Exige X-Hub-Signature-256",
+        "security": [],
+        "x-guilda-access": "signature",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Sucesso (JSON)"
+          },
+          "400": {
+            "description": "Regra de negócio",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sem sessão",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem permissão",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Não encontrado (inclusive recurso de outra igreja)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflito (versão desatualizada, vaga cheia, troca já resolvida)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validação",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/webhooks/ycloud": {
+      "post": {
+        "summary": "Eventos do YCloud (estados de entrega e PARAR). Exige YCloud-Signature",
         "security": [],
         "x-guilda-access": "signature",
         "parameters": [],
