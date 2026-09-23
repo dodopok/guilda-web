@@ -11,5 +11,5 @@
     "resolveJsonModule": true,
     "types": ["node"]
   },
-  "include": ["worker/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts", "server/services/**/*.ts", "server/lib/**/*.ts", "server/db/**/*.ts", "server/integrations/**/*.ts", "server/config.ts", "drizzle.config.ts", "vitest.config.ts", "playwright.config.ts"]
+  "include": [".railway/**/*.ts", "worker/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts", "server/services/**/*.ts", "server/lib/**/*.ts", "server/db/**/*.ts", "server/integrations/**/*.ts", "server/config.ts", "drizzle.config.ts", "vitest.config.ts", "playwright.config.ts"]
 }
