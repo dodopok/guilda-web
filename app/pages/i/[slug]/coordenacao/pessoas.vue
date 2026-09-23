@@ -112,7 +112,7 @@ async function savePerson() {
     const roles = ['participant', ...(edit.coordinator ? ['coordinator'] : []), ...(edit.pastor ? ['pastor'] : [])]
     const changes: Record<string, unknown> = {}
     if (edit.displayName.trim() !== p.displayName) changes.displayName = edit.displayName.trim()
-    if ((edit.phone.trim() || null) !== (p.phone ?? null)) changes.phone = edit.phone.trim() || null
+    if (normalizePhoneBR(edit.phone) !== (p.phone ?? null)) changes.phone = edit.phone.trim() || null
     if (roles.sort().join() !== [...p.roles].sort().join()) changes.roles = roles
     if (edit.restExempt !== p.restExempt) changes.restExempt = edit.restExempt
     if (Object.keys(changes).length) await capi(`/people/${p.id}`, { method: 'PATCH', body: changes })
@@ -448,7 +448,7 @@ function setRole(r: 'vol' | 'coord' | 'pastor') {
               {{ person.displayName }}
             </h2>
             <p class="soft small">
-              {{ roleTag(person) || 'Voluntário(a)' }} · {{ person.phone ?? 'Sem telefone' }}
+              {{ roleTag(person) || 'Voluntário(a)' }} · {{ displayPhone(person.phone) ?? 'Sem telefone' }}
             </p>
           </div>
         </div>
@@ -484,15 +484,12 @@ function setRole(r: 'vol' | 'coord' | 'pastor') {
                 v-model="edit.displayName"
                 class="input"
               ></label>
-              <label class="field"><span class="field__label">Celular</span><input
+              <label class="field"><span class="field__label">Celular</span><PhoneInput
                 v-model="edit.phone"
-                class="input"
-                type="tel"
-                placeholder="(51) 99999-9999"
-              ></label>
+              /></label>
             </div>
             <p
-              v-if="(edit.phone.trim() || null) !== (person.phone ?? null) && person.phone"
+              v-if="normalizePhoneBR(edit.phone) !== (person.phone ?? null) && person.phone"
               class="small"
               style="color:#a86400;margin-top:-6px"
             >
@@ -672,12 +669,9 @@ function setRole(r: 'vol' | 'coord' | 'pastor') {
           class="input"
           autocomplete="off"
         ></label>
-        <label class="field"><span class="field__label">Celular (WhatsApp)</span><input
+        <label class="field"><span class="field__label">Celular (WhatsApp)</span><PhoneInput
           v-model="np.phone"
-          class="input"
-          type="tel"
-          placeholder="(51) 99999-9999"
-        ></label>
+        /></label>
         <button class="btn btn--block">
           Cadastrar
         </button>

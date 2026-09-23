@@ -402,14 +402,11 @@ async function finish(to: 'preparar' | 'mesa') {
             placeholder="Nome"
             aria-label="Nome"
           >
-          <input
+          <PhoneInput
             v-model="np.phone"
-            class="input"
-            type="tel"
             style="flex:1 1 160px;width:auto;border-radius:14px"
-            placeholder="(51) 99999-9999"
             aria-label="Celular"
-          >
+          />
           <button
             class="btn btn--dark btn--sm"
             style="min-height:48px;border-radius:14px"
@@ -435,7 +432,7 @@ async function finish(to: 'preparar' | 'mesa') {
             <span
               class="muted"
               style="font-size:13.5px"
-            >{{ p.phone ?? 'sem telefone' }}</span>
+            >{{ displayPhone(p.phone) ?? 'sem telefone' }}</span>
           </div>
         </div>
         <div class="row">

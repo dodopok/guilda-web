@@ -162,14 +162,10 @@ async function copy(text: string) {
             class="input"
             autocomplete="off"
           ></label>
-          <label class="field"><span class="field__label">Celular (WhatsApp)</span><input
+          <label class="field"><span class="field__label">Celular (WhatsApp)</span><PhoneInput
             v-model="form.coordPhone"
-            class="input"
-            type="tel"
-            inputmode="tel"
             autocomplete="off"
-            placeholder="(51) 99999-9999"
-          ></label>
+          /></label>
         </div>
         <button
           class="btn"

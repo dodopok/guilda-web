@@ -73,7 +73,11 @@ async function copy(text: string) {
 function addNumber() {
   const v = newNumber.value.trim()
   if (!v) return
-  if (!form.testRecipients.includes(v)) form.testRecipients.push(v)
+  if (!normalizePhoneBR(v)) {
+    toast.error('Número inválido. Use DDD + número, ex.: (51) 99999-9999.')
+    return
+  }
+  if (!form.testRecipients.some((n) => normalizePhoneBR(n) === normalizePhoneBR(v))) form.testRecipients.push(v)
   newNumber.value = ''
 }
 
@@ -212,13 +216,18 @@ async function save() {
         <label class="field">
           <span class="field__label">{{ meta ? 'Identificador do número (Phone number ID)' : 'Número da igreja' }}</span>
           <input
+            v-if="meta"
             v-model="form.number"
             class="input"
-            :type="meta ? 'text' : 'tel'"
-            :inputmode="meta ? 'numeric' : 'tel'"
+            inputmode="numeric"
             autocomplete="off"
-            :placeholder="meta ? 'Somente números' : '+55 51 9 0000-0000'"
+            placeholder="Somente números"
           >
+          <PhoneInput
+            v-else
+            v-model="form.number"
+            autocomplete="off"
+          />
         </label>
         <div class="fields-2">
           <label class="field">
@@ -316,25 +325,22 @@ async function save() {
             :key="n"
             class="row"
             style="gap:6px;padding:5px 5px 5px 12px;border-radius:999px;background:var(--surface-4);font-weight:700;font-size:13.5px"
-          >{{ n }}<button
+          >{{ displayPhone(n) }}<button
             type="button"
             class="icon-btn icon-btn--round icon-btn--sm"
             style="width:24px;height:24px;background:#fff"
-            :aria-label="`Tirar ${n}`"
+            :aria-label="`Tirar ${displayPhone(n)}`"
             @click="form.testRecipients.splice(i, 1)"
           ><Icon
             name="x"
             :weight="2.4"
           /></button></span>
-          <input
+          <PhoneInput
             v-model="newNumber"
-            class="input"
             style="width:auto;flex:1 1 150px;min-height:40px;padding:8px 12px;font-size:14.5px"
-            type="tel"
-            placeholder="+55 51 9…"
             aria-label="Novo número de teste"
             @keydown.enter.prevent="addNumber"
-          >
+          />
           <button
             type="button"
             class="btn btn--line btn--xs"
