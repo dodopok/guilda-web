@@ -1,0 +1,51 @@
+# Ambiente local da Guilda Web.
+#   docker compose up -d db          -> só o PostgreSQL (desenvolvimento com pnpm dev)
+#   docker compose --profile app up  -> PostgreSQL + aplicação web + trabalhador
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: guilda
+      POSTGRES_PASSWORD: guilda
+      POSTGRES_DB: guilda
+    ports:
+      - "${GUILDA_DB_PORT:-5432}:5432"
+    volumes:
+      - guilda-db:/var/lib/postgresql/data
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U guilda -d guilda"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  web:
+    profiles: ["app"]
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://guilda:guilda@db:5432/guilda
+      NUXT_HOST: 0.0.0.0
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["sh", "-c", "node scripts-dist/migrate.mjs && node .output/server/index.mjs"]
+
+  worker:
+    profiles: ["app"]
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://guilda:guilda@db:5432/guilda
+    depends_on:
+      db:
+        condition: service_healthy
+      web:
+        condition: service_started
+    command: ["node", "scripts-dist/worker.mjs"]
+
+volumes:
+  guilda-db:
