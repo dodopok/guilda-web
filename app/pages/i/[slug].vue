@@ -1,6 +1,29 @@
 <script setup lang="ts">
 import type { ChurchInfo } from '~/types'
 
+// Decide o destino antes de montar a tela: quem coordena e ainda não configurou a igreja vai
+// para a configuração inicial; quem não coordena não entra na coordenação. Redirecionar de
+// dentro do componente, no meio da navegação, trocava a URL sem trocar a tela.
+definePageMeta({
+  middleware: [async (to) => {
+    const slug = String(to.params.slug ?? '')
+    const state = useState<ChurchInfo | null>('church-info', () => null)
+    if (!state.value || state.value.church.slug !== slug) {
+      try {
+        state.value = await api<ChurchInfo>(`/churches/${slug}`)
+      } catch {
+        return // a própria tela mostra o erro (sem acesso, igreja inexistente)
+      }
+    }
+    const base = `/i/${slug}`
+    const isCoord = state.value.me.roles.includes('coordinator')
+    if (to.path.startsWith(`${base}/coordenacao`) && !isCoord) return navigateTo(base, { replace: true })
+    if (isCoord && !state.value.church.setupCompleted && to.path !== `${base}/coordenacao/comecar`) {
+      return navigateTo(`${base}/coordenacao/comecar`, { replace: true })
+    }
+  }],
+})
+
 const route = useRoute()
 const { info, capi, link, isCoordinator, isPastor, churchName, accent, logoUrl, prepMonth, slug } = useChurch()
 const { memberships } = useSession()
@@ -30,13 +53,7 @@ const myName = computed(() => me.value?.displayName ?? '')
 const roleLabel = computed(() => (isCoordinator.value ? 'Coordenação' : isPastor.value ? 'Pastoral' : 'Voluntário(a)'))
 
 // Telas da coordenação: só para quem coordena. A configuração inicial ocupa a tela toda.
-const inDesk = computed(() => route.path.startsWith(link('/coordenacao')))
 const bare = computed(() => route.path === link('/coordenacao/comecar'))
-watchEffect(() => {
-  if (!info.value) return
-  if (inDesk.value && !isCoordinator.value) navigateTo(link(''), { replace: true })
-  else if (isCoordinator.value && !info.value.church.setupCompleted && !bare.value) navigateTo(link('/coordenacao/comecar'), { replace: true })
-})
 
 const EXTRA = ['/coordenacao/configuracoes', '/coordenacao/mensagens', '/coordenacao/whatsapp', '/coordenacao/modelos', '/coordenacao/repertorio', '/coordenacao/importar', '/coordenacao/historico']
 function starts(p: string) {

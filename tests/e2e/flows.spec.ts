@@ -208,3 +208,54 @@ test('isolamento: participante não abre outra igreja pela URL', async ({ browse
   await expect(alice).toHaveURL(/\/i\/porto$/)
   await alice.context().close()
 })
+
+test('nova igreja: convite da coordenação abre a configuração inicial', async ({ browser }) => {
+  const admin = await (await browser.newContext({ locale: 'pt-BR' })).newPage()
+  await login(admin, 'admin@guilda.local', 'guilda-admin-local')
+  await admin.goto('/admin/igrejas')
+  await admin.getByLabel('Nome da igreja').fill('Igreja Nova de Teste')
+  await admin.getByLabel('Nome', { exact: true }).fill('Coordenação Nova')
+  await admin.getByLabel('Celular (WhatsApp)').fill('(51) 90000-0777')
+  await admin.getByRole('button', { name: /Criar igreja/ }).click()
+  const link = (await admin.locator('code').first().textContent())!.trim()
+  expect(link).toContain('/convite/')
+
+  const coord = await (await browser.newContext({ locale: 'pt-BR' })).newPage()
+  await coord.goto(link)
+  await coord.getByLabel('Crie sua senha').fill('senha nova longa 123')
+  await coord.getByLabel('Repita a senha').fill('senha nova longa 123')
+  await coord.getByRole('button', { name: 'Criar senha' }).click()
+  await coord.getByRole('button', { name: 'Continuar' }).click()
+  await coord.getByRole('link', { name: 'Começar' }).click()
+  // A tela troca de verdade (antes a URL mudava e a tela do convite ficava).
+  await expect(coord).toHaveURL(/\/coordenacao\/comecar$/)
+  await expect(coord.getByRole('heading', { name: /Boas-vindas à Guilda/ })).toBeVisible()
+  await coord.getByRole('button', { name: /Vamos começar/ }).click()
+  await expect(coord.getByText('Configuração inicial · passo 2 de 6')).toBeVisible()
+  await admin.context().close()
+  await coord.context().close()
+})
+
+test('logo: JPG enviado em Configurações é lido, guardado e sugere cores', async ({ browser }) => {
+  const coord = await as(browser, PHONES.coord)
+  await coord.goto('/i/porto/coordenacao/configuracoes')
+  // Gera um JPG de verdade no próprio navegador (quadrado azul com faixa laranja).
+  const b64 = await coord.evaluate(() => {
+    const c = document.createElement('canvas')
+    c.width = 400
+    c.height = 300
+    const g = c.getContext('2d')!
+    g.fillStyle = '#1f6f8b'
+    g.fillRect(0, 0, 400, 300)
+    g.fillStyle = '#c2561c'
+    g.fillRect(0, 200, 400, 100)
+    return c.toDataURL('image/jpeg', 0.9).split(',')[1]!
+  })
+  await coord.locator('input[type=file]').setInputFiles({ name: 'logo.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(b64, 'base64') })
+  await expect(coord.getByText(/Cores encontradas no logo|Logo enviado/)).toBeVisible()
+  await expect(coord.getByText('Não foi possível')).toHaveCount(0)
+  const res = await coord.request.get('/api/v1/churches/porto/logo')
+  expect(res.status()).toBe(200)
+  expect(res.headers()['content-type']).toMatch(/image\/(webp|png)/)
+  await coord.context().close()
+})

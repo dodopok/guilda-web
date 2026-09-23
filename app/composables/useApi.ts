@@ -23,5 +23,7 @@ export function apiErrorMessage(e: unknown, fallback = 'Não foi possível concl
   }
   if (body?.message) return body.message
   if (fe?.statusCode === 0 || fe?.message?.includes('fetch')) return 'Sem conexão com o servidor. Verifique a internet e tente de novo.'
+  // Erros criados pelo próprio app (sem resposta do servidor) já trazem texto para a pessoa.
+  if (e instanceof Error && fe.statusCode === undefined && fe.data === undefined && e.message) return e.message
   return fallback
 }

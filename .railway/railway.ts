@@ -28,6 +28,8 @@ export default defineRailway((ctx) => {
     // Domínio próprio: descomente depois de criar o CNAME no DNS e troque APP_BASE_URL.
     // domains: ['guilda.anglicanaporto.com.br'],
     env: {
+      // Porta fixa: o domínio público aponta para ela (railway domain --port 3000).
+      PORT: '3000',
       DATABASE_URL: db.env.DATABASE_URL,
       APP_BASE_URL: 'https://${{RAILWAY_PUBLIC_DOMAIN}}',
       SESSION_COOKIE_SECURE: 'true',

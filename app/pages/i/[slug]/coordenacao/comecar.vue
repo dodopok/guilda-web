@@ -17,18 +17,8 @@ const swatches = computed(() => (palette.value.length ? palette.value : SWATCHES
 async function onLogo(e: Event) {
   const file = (e.target as HTMLInputElement).files?.[0]
   if (!file) return
-  if (!/^image\/(png|jpeg|webp)$/.test(file.type)) {
-    toast.error('Envie uma imagem PNG, JPG ou WebP.')
-    return
-  }
   try {
-    const url = URL.createObjectURL(file)
-    const img = new Image()
-    await new Promise((resolve, reject) => {
-      img.onload = resolve
-      img.onerror = reject
-      img.src = url
-    })
+    const img = await loadImageFile(file)
     const canvas = document.createElement('canvas')
     canvas.width = 256
     canvas.height = 256
@@ -36,7 +26,6 @@ async function onLogo(e: Event) {
     canvas.getContext('2d')!.drawImage(img, (img.naturalWidth - s) / 2, (img.naturalHeight - s) / 2, s, s, 0, 0, 256, 256)
     const webp = canvas.toDataURL('image/webp', 0.9)
     await capi('/logo', { method: 'PUT', body: { dataUrl: webp.startsWith('data:image/webp') ? webp : canvas.toDataURL('image/png') } })
-    URL.revokeObjectURL(url)
     const found = extractPalette(img)
     if (found.length) {
       palette.value = found
@@ -45,7 +34,7 @@ async function onLogo(e: Event) {
     }
     await refreshInfo()
   } catch (err) {
-    toast.error(err, 'Não foi possível ler a imagem.')
+    toast.error(err, 'Não foi possível enviar a imagem.')
   }
 }
 async function saveIdentity() {
@@ -413,14 +402,11 @@ async function finish(to: 'preparar' | 'mesa') {
             placeholder="Nome"
             aria-label="Nome"
           >
-          <input
+          <PhoneInput
             v-model="np.phone"
-            class="input"
-            type="tel"
             style="flex:1 1 160px;width:auto;border-radius:14px"
-            placeholder="(51) 99999-9999"
             aria-label="Celular"
-          >
+          />
           <button
             class="btn btn--dark btn--sm"
             style="min-height:48px;border-radius:14px"
@@ -446,7 +432,7 @@ async function finish(to: 'preparar' | 'mesa') {
             <span
               class="muted"
               style="font-size:13.5px"
-            >{{ p.phone ?? 'sem telefone' }}</span>
+            >{{ displayPhone(p.phone) ?? 'sem telefone' }}</span>
           </div>
         </div>
         <div class="row">

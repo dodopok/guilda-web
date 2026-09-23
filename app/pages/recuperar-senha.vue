@@ -55,15 +55,11 @@ async function submit() {
         </p>
         <label class="field">
           <span class="field__label">Seu celular</span>
-          <input
+          <PhoneInput
             v-model="login"
-            class="input"
-            type="tel"
-            inputmode="tel"
             autocomplete="username"
-            placeholder="(51) 99999-9999"
             required
-          >
+          />
         </label>
         <p
           v-if="error"

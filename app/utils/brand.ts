@@ -91,3 +91,26 @@ export function liturgicalHex(color?: string | null) {
   const key = liturgicalKey(color)
   return key ? LITURGICAL_HEX[key]! : null
 }
+
+// Abre a imagem escolhida pela pessoa lendo o arquivo como data: URL. A política de
+// segurança do app permite imagens data: e não blob:, então URL.createObjectURL não serve.
+export async function loadImageFile(file: File): Promise<HTMLImageElement> {
+  const byName = /\.(png|jpe?g|webp)$/i.test(file.name)
+  if (!/^image\/(png|jpeg|webp)$/.test(file.type) && !(file.type === '' && byName)) {
+    throw new Error(/heic|heif/i.test(file.type + file.name) ? 'Fotos HEIC do iPhone não servem: exporte como JPG ou PNG.' : 'Envie uma imagem PNG, JPG ou WebP.')
+  }
+  if (file.size > 20 * 1024 * 1024) throw new Error('Imagem grande demais (máximo 20 MB).')
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(new Error('Não foi possível ler o arquivo.'))
+    reader.readAsDataURL(file)
+  })
+  const img = new Image()
+  await new Promise<void>((resolve, reject) => {
+    img.onload = () => resolve()
+    img.onerror = () => reject(new Error('O navegador não conseguiu abrir essa imagem. Tente salvar como PNG ou JPG.'))
+    img.src = dataUrl
+  })
+  return img
+}
