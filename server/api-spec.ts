@@ -123,6 +123,7 @@ export const ROUTES: RouteDoc[] = [
   { method: 'post', path: '/api/v1/webhooks/whatsapp', summary: 'Estados de entrega e mensagens recebidas (PARAR). Exige X-Hub-Signature-256', auth: 'signature' },
   { method: 'post', path: '/api/v1/webhooks/ycloud', summary: 'Eventos do YCloud (estados de entrega e PARAR). Exige YCloud-Signature', auth: 'signature' },
   // Liturgia
+  { method: 'get', path: `${C}/liturgy/prayer-books`, summary: 'Livros de oração disponíveis no Estêvão (API v2)', auth: 'coordinator' },
   { method: 'get', path: `${C}/templates`, summary: 'Modelos de liturgia', auth: 'session' },
   { method: 'post', path: `${C}/templates`, summary: 'Criar modelo', auth: 'coordinator', body: templateSchema },
   { method: 'get', path: `${C}/templates/{id}`, summary: 'Modelo com blocos', auth: 'session' },

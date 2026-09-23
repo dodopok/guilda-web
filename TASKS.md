@@ -102,5 +102,5 @@ Legenda: [x] feito e testado · [~] implementado, depende de validação externa
 1. Na tela do canal: número, chave de API e segredo do webhook do YCloud; cadastrar a URL do webhook no YCloud; comprovar a coexistência com um envio de teste.
 2. Aprovação dos modelos em `docs/integracoes.md` / tela do canal.
 3. Número de teste que autorizou receber mensagens.
-4. URL e chave de desenvolvimento do Estêvão (`ESTEVAO_API_URL`, `ESTEVAO_API_KEY`).
+4. Chave definitiva do Estêvão no ambiente de produção (`ESTEVAO_API_KEY`); a integração v2 já foi conferida na instância real com uma chave de teste.
 5. Confirmação dos direitos de uso dos textos do LOC.

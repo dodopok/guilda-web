@@ -66,7 +66,9 @@ describe('roteiro de liturgia e Estêvão', () => {
     expect(sug.suggestion.readings.map((r) => r.key)).toEqual(['first_reading', 'psalm', 'second_reading', 'gospel'])
     const snap = await db().query.liturgicalSnapshots.findFirst({ where: eq(liturgicalSnapshots.id, sug.snapshotId) })
     expect(JSON.stringify(snap!.payload)).not.toContain('TEXTO BÍBLICO')
-    expect(snap!.requestPath).toContain('preferences%5Bprayer_book_code%5D=loc_2027')
+    expect(snap!.requestPath).toContain('/api/v2/days/')
+    expect(snap!.requestPath).toContain('book=loc_2027')
+    expect(snap!.requestPath).not.toContain('readings.text')
     const call = okFetch.mock.calls[0] as unknown as [string, RequestInit]
     expect((call[1].headers as Record<string, string>)['X-API-Key']).toBe('test-key')
 

@@ -15,6 +15,7 @@ const form = reactive({
   reminderTime: c.value.reminderTime,
   confirmationDeadlineHours: c.value.confirmationDeadlineHours,
   liturgicalReadingType: c.value.liturgicalReadingType,
+  liturgicalPrayerBook: c.value.liturgicalPrayerBook,
   accentColor: c.value.accentColor,
 })
 const savedAccent = ref(c.value.accentColor)
@@ -24,6 +25,12 @@ watch(() => form.accentColor, (v) => {
 })
 onBeforeRouteLeave(() => {
   if (info.value && form.accentColor !== savedAccent.value) info.value.church.accentColor = savedAccent.value
+})
+// Livros de oração vêm do Estêvão (a API exige escolher um).
+const { data: books } = useLazyAsyncData(`prayer-books-${slug.value}`, () => capi<{ available: boolean, reason?: string, books: { code: string, name: string }[] }>('/liturgy/prayer-books').catch(() => null))
+const bookOptions = computed(() => {
+  const list = books.value?.books ?? []
+  return list.some((b) => b.code === form.liturgicalPrayerBook) ? list : [{ code: form.liturgicalPrayerBook, name: form.liturgicalPrayerBook }, ...list]
 })
 const TIMEZONES = ['America/Sao_Paulo', 'America/Manaus', 'America/Fortaleza', 'America/Belem', 'America/Cuiaba', 'America/Rio_Branco', 'America/Noronha', 'Europe/Lisbon']
 const TZ_LABEL: Record<string, string> = { 'America/Sao_Paulo': 'Brasília', 'America/Manaus': 'Manaus', 'America/Fortaleza': 'Fortaleza', 'America/Belem': 'Belém', 'America/Cuiaba': 'Cuiabá', 'America/Rio_Branco': 'Rio Branco', 'America/Noronha': 'Fernando de Noronha', 'Europe/Lisbon': 'Lisboa' }
@@ -121,6 +128,7 @@ async function save() {
         reminderTime: form.reminderTime,
         confirmationDeadlineHours: Math.max(0, Number(form.confirmationDeadlineHours) || 0),
         liturgicalReadingType: form.liturgicalReadingType,
+        liturgicalPrayerBook: form.liturgicalPrayerBook,
         accentColor: form.accentColor,
       },
     })
@@ -341,6 +349,19 @@ const tools = computed(() => [
           >{{ TZ_LABEL[z] ?? z }} ({{ z }})</option>
         </select></label>
       </div>
+      <label class="field"><span class="field__label">Livro de oração (Estêvão)</span><select
+        v-model="form.liturgicalPrayerBook"
+        class="select"
+      >
+        <option
+          v-for="b in bookOptions"
+          :key="b.code"
+          :value="b.code"
+        >{{ b.name }}</option>
+      </select><span
+        v-if="books && !books.available"
+        class="field__hint"
+      >{{ books.reason }}</span></label>
       <label class="field"><span class="field__label">Leituras do lecionário (Estêvão)</span><select
         v-model="form.liturgicalReadingType"
         class="select"

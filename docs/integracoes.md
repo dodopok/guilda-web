@@ -49,29 +49,35 @@ O YCloud é parceiro oficial da Meta, conecta um número que já está no aplica
 
 Até esses itens serem comprovados e registrados na tela "Canal do WhatsApp", a integração fica **implementada e testada por contrato, mas não validada com a Meta**.
 
-## Estêvão (LOC REB 2027)
+## Estêvão (API v2)
 
 ### Contrato
 
-Conferido no código-fonte do `estevao-api` (controladores `CalendarController`, `LectionaryController`, `Calendar::DayPayload`, `Reading::Selection`, `Reading::Passage`, `CollectService`), não em uma instância em execução:
+Conferido na instância `https://api.caminhoanglicano.com.br` com uma chave de teste (contrato publicado em `/api-docs/v2/swagger.yaml`):
 
-- `GET /api/v1/calendar/:ano/:mês/:dia` com cabeçalho `X-API-Key` e `preferences[prayer_book_code]=loc_2027`, `preferences[reading_type]=complementary|semicontinuous`. O livro `loc_2027` está marcado como `external_only` (disponível só por chave de API).
-- Resposta usada: `date`, `liturgical_season`, `liturgical_color`, `sunday_name`, `celebration`, `celebrations[]`, `collect[]` (`text`, `title`, `subtitle`, …) e `readings` com `first_reading`, `psalm`, `psalm_alternative`, `second_reading`, `gospel` (`reference`, `alternative`, `alternatives`).
+- `GET /api/v2/days/:data?book=…&service=eucharist&reading_type=complementary|semicontinuous&include=readings,readings.alternatives,collect.text,celebrations`, cabeçalho `X-API-Key`. `book` é obrigatório na v2 (sem padrão silencioso) e vem da configuração da igreja.
+- Resposta `{ data, meta }`: `season.name`, `color`, `sunday_name`, `celebration`, `celebrations[]`, `collect[]` (`title`, `kind`, `text`) e `readings[]` como **lista com `slot`** (`first_reading`, `psalm`, `second_reading`, `gospel`…), `reference` e `alternatives`. Slots desconhecidos entram como "Leitura".
+- Nunca pedimos `readings.text`: o texto bíblico não trafega nem é guardado.
+- `GET /api/v2/prayer-books?lang=pt-BR` alimenta a escolha do livro em Configurações (guardado em memória por uma hora).
+- Erros `application/problem+json` com `code` estável (`UNKNOWN_PRAYER_BOOK`, `RATE_LIMITED`, `MISSING_API_KEY`…) viram mensagens em português.
+- Observado na instância (difere do texto do desenho da v2): a cor vem em português (`verde`), e chave inválida responde `401 MISSING_API_KEY` em vez de um código próprio. A Guilda aceita cor em inglês ou português.
+- `reading_type` não aparece no swagger de `/days/:data`, mas é aceito: com `complementary` e `semicontinuous` a primeira leitura e o salmo mudam como esperado.
+
+Conferência manual, sem gravar nada: `ESTEVAO_API_URL=… ESTEVAO_API_KEY=… npx tsx scripts/estevao-check.ts 2026-10-11 loc_2015 complementary`.
 
 ### Comportamento na Guilda
 
 - A coordenação busca as sugestões do dia do culto; a resposta é validada e guardada como **foto** (`liturgical_snapshots`) com caminho da consulta e horário, sem a chave.
 - Ela escolhe a coleta e **quantas leituras quiser** (inclusive alternativas); cada leitura vira um bloco com referência, função e pessoa próprias. A pessoa atribuída a cada posição de leitura é mantida ao reaplicar.
-- **Textos bíblicos não são guardados** (o campo `content` é descartado): só referências. A coleta é guardada para uso da própria igreja.
+- A coleta é guardada para uso da própria igreja.
 - A versão publicada do roteiro copia os dados escolhidos e a foto usada; nova resposta do Estêvão não altera o publicado.
-- Em falha (sem configuração, rede, HTTP, formato), a tela explica, oferece a última foto guardada e o preenchimento manual. Escala, lembretes e confirmações não dependem do Estêvão.
-- `pnpm estevao:mock` sobe um servidor local com o mesmo contrato e dados fictícios.
+- Em falha (sem configuração, rede, HTTP, formato, limite de consultas), a tela explica, oferece a última foto guardada e o preenchimento manual. Escala, lembretes e confirmações não dependem do Estêvão.
+- `pnpm estevao:mock` sobe um servidor local com o mesmo contrato v2 e dados fictícios.
 
 ### Não validado
 
-1. Resposta real da instância com uma chave de desenvolvimento (URL e chave não foram fornecidas; o conector MCP do Estêvão não conectou nesta sessão).
-2. Cobertura de datas do LOC 2027 para os meses de uso e festas transferidas.
-3. **Direitos de exibição e redistribuição** dos textos do LOC (coleta e ritos) e dos textos bíblicos. Por isso: textos do LOC ficam restritos à igreja que os cadastrou, os modelos de exemplo têm apenas marcadores, e não há cópia de modelos entre igrejas. Confirmar com os detentores dos direitos antes de oferecer modelos a outras comunidades.
+1. Cobertura de datas do livro escolhido para os meses de uso e festas transferidas.
+2. **Direitos de exibição e redistribuição** dos textos do LOC (coleta e ritos) e dos textos bíblicos. Por isso: textos do LOC ficam restritos à igreja que os cadastrou, os modelos de exemplo têm apenas marcadores, e não há cópia de modelos entre igrejas. Confirmar com os detentores dos direitos antes de oferecer modelos a outras comunidades.
 
 ## Roteiro, músicas e avisos
 

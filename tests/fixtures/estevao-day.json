@@ -1,25 +1,25 @@
 {
-  "season_post_slug": "tempo-comum",
-  "date": "2026-11-08",
-  "liturgical_year": "A",
-  "is_sunday": true,
-  "is_holy_day": false,
-  "week_of_season": 23,
-  "celebration": null,
-  "celebrations": [],
-  "day_of_week": "Domingo",
-  "liturgical_season": "Tempo Comum",
-  "liturgical_color": "verde",
-  "sunday_name": "Domingo Próprio 27",
-  "collect": [
-    { "text": "Texto fictício de coleta para teste automatizado.", "module_title": "Coleta do Dia", "title": "Domingo Próprio 27" }
-  ],
-  "readings": {
-    "first_reading": { "reference": "Am 5.18-24", "translation": "x", "content": "TEXTO BÍBLICO QUE NÃO DEVE SER GUARDADO" },
-    "psalm": { "reference": "Sl 70" },
-    "second_reading": { "reference": "1Ts 4.13-18" },
-    "gospel": { "reference": "Mt 25.1-13", "alternative": { "reference": "Mt 25.1-10" } }
+  "data": {
+    "date": "2026-11-08",
+    "liturgical_year": "A",
+    "is_sunday": true,
+    "is_holy_day": false,
+    "week_of_season": 23,
+    "day_of_week": "Domingo",
+    "season": { "slug": "season-ordinary-time", "name": "Tempo Comum" },
+    "sunday_name": "Domingo Próprio 27",
+    "color": "verde",
+    "celebration": null,
+    "celebrations": [],
+    "collect": [
+      { "title": "Domingo Próprio 27", "kind": "Coleta do Dia", "text": "Texto fictício de coleta para teste automatizado." }
+    ],
+    "readings": [
+      { "slot": "first_reading", "reference": "Am 5.18-24", "alternatives": [], "text": { "format": "plain", "content": "TEXTO BÍBLICO QUE NÃO DEVE SER GUARDADO" } },
+      { "slot": "psalm", "reference": "Sl 70", "alternatives": [] },
+      { "slot": "second_reading", "reference": "1Ts 4.13-18", "alternatives": [] },
+      { "slot": "gospel", "reference": "Mt 25.1-13", "alternatives": ["Mt 25.1-10"] }
+    ]
   },
-  "morning_readings": null,
-  "evening_readings": null
+  "meta": { "prayer_book": "loc_2027", "language": "pt-BR", "bible": "nvi" }
 }
