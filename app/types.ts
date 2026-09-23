@@ -219,6 +219,7 @@ export interface BlockData {
   reference?: string
   alternatives?: string[]
   source?: 'estevao' | 'manual'
+  slot?: string
   songIds?: string[]
   items?: { text: string, ownerPersonId?: string | null, status?: 'draft' | 'ready', fixed?: boolean }[]
   templateBody?: string | null
@@ -272,6 +273,7 @@ export interface ScriptView {
 export interface LiturgicalSuggestion {
   date: string
   sundayName: string | null
+  proper?: string | null
   season: string | null
   color: string | null
   celebration: string | null

@@ -184,6 +184,45 @@ test('fluxos 6 e 7: roteiro a partir do modelo, Estêvão, publicação e leitur
   await coord.context().close()
 })
 
+test('modelo de liturgia: título fixo, nome do domingo, rito do LOC e leituras marcadas', async ({ browser }) => {
+  const coord = await as(browser, PHONES.coord)
+  await coord.goto('/i/porto/coordenacao/modelos')
+  await coord.getByRole('button', { name: /Criar modelo/ }).click()
+  await expect(coord).toHaveURL(/\/coordenacao\/modelos\/[0-9a-f-]{36}$/)
+  const id = coord.url().split('/').pop()!
+  await coord.getByLabel('Nome do modelo').fill('Modelo e2e')
+  const addBlock = async (label: string) => {
+    await coord.getByRole('button', { name: 'Acrescentar bloco' }).click()
+    await coord.getByRole('button', { name: new RegExp(`^${label}`) }).click()
+  }
+  await addBlock('Título')
+  // Título é só texto: sem escolha de fonte.
+  await expect(coord.getByText('É texto do Livro de Oração (LOC)')).toHaveCount(0)
+  await coord.getByLabel('Título no roteiro').fill('Liturgia da Palavra')
+  await addBlock('Nome do domingo')
+  await expect(coord.getByText(/com o Próprio no Tempo Comum/)).toBeVisible()
+  await addBlock('Rito')
+  await coord.getByLabel('Título no roteiro').fill('Confissão')
+  await coord.getByRole('textbox', { name: 'Texto', exact: true }).fill('Texto de exemplo')
+  await coord.getByText('É texto do Livro de Oração (LOC)').click()
+  await addBlock('Leituras do dia')
+  await coord.getByRole('checkbox', { name: 'Segunda leitura' }).uncheck()
+  await coord.getByRole('button', { name: 'Salvar modelo' }).click()
+  await expect(coord.getByText(/Modelo salvo/)).toBeVisible()
+
+  const res = await coord.request.get(`/api/v1/churches/porto/templates/${id}`)
+  const { template } = await res.json() as { template: { blocks: { type: string, title: string, textSource: string }[] } }
+  expect(template.blocks.map((b) => [b.type, b.title, b.textSource])).toEqual([
+    ['heading', 'Liturgia da Palavra', 'church'],
+    ['heading', 'Nome do domingo', 'estevao'],
+    ['rite', 'Confissão', 'loc_manual'],
+    ['reading', 'Primeira leitura', 'estevao'],
+    ['psalm', 'Salmo', 'estevao'],
+    ['reading', 'Evangelho', 'estevao'],
+  ])
+  await coord.context().close()
+})
+
 test('telas complementares da coordenação abrem pelas Configurações', async ({ browser }) => {
   const coord = await as(browser, PHONES.coord)
   await coord.goto('/i/porto/coordenacao/configuracoes')

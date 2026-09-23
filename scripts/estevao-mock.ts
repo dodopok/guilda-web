@@ -33,6 +33,7 @@ createServer((req, res) => {
       season: { slug: 'exemplo', name: 'Tempo Comum (exemplo)' },
       color: COLORS[n % COLORS.length],
       sunday_name: `Domingo de exemplo ${n}`,
+      description: [`Próprio ${(n % 29) + 1}`, 'Semana de exemplo'],
       is_sunday: true,
       celebration: n % 7 === 0 ? { name: 'Celebração fictícia', type: 'festival' } : null,
       celebrations: [],

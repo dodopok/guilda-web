@@ -479,6 +479,18 @@ details > summary::-webkit-details-marker { display: none; }
 .tplvars th { text-align: left; font-size: 12px; font-weight: 800; color: var(--muted); padding: 4px 8px 4px 0; text-transform: uppercase; letter-spacing: .04em; }
 .tplvars td { padding: 6px 8px 6px 0; border-top: 1px solid var(--line-2); vertical-align: top; }
 
+/* Caixa de marcar com texto */
+.check { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: 14px; border: 1.5px solid var(--control); background: #fff; cursor: pointer; }
+.check input { margin-top: 3px; accent-color: var(--accent); width: 18px; height: 18px; flex: none; }
+.check__text { flex: 1; }
+.suggest:disabled { opacity: .45; cursor: not-allowed; }
+
+/* Caixa de marcar com texto */
+.check { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: 14px; border: 1.5px solid var(--control); background: #fff; cursor: pointer; }
+.check input { margin-top: 3px; accent-color: var(--accent); width: 18px; height: 18px; flex: none; }
+.check__text { flex: 1; }
+.suggest:disabled { opacity: .45; cursor: not-allowed; }
+
 /* Utilitários de formulário e contagem */
 .fields-2 { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
 .badge-count { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--no); color: #fff; font-size: 12px; font-weight: 800; display: inline-grid; place-items: center; }

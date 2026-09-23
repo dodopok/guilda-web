@@ -7,44 +7,115 @@ const id = String(route.params.id)
 const { capi, link } = useChurch()
 const toast = useToast()
 
-interface Block { key: string, type: string, title: string, body: string | null, textSource: string, dutyId: string | null }
-interface TemplateFull { id: string, name: string, kind: string, description: string | null, blocks: (Omit<Block, 'key'> & { id: string })[] }
+interface RawBlock { id: string, type: string, title: string, body: string | null, textSource: string, dutyId: string | null }
+interface TemplateFull { id: string, name: string, kind: string, description: string | null, blocks: RawBlock[] }
 const { data, refresh } = await useAsyncData(`template-${id}`, async () => {
   const [t, c] = await Promise.all([capi<{ template: TemplateFull }>(`/templates/${id}`), capi<{ duties: Duty[] }>('/catalog')])
   return { template: t.template, duties: c.duties.filter((d) => d.active) }
 })
 
-const form = reactive({ name: '', kind: 'regular', description: null as string | null })
-const blocks = ref<Block[]>([])
+// O modelo na tela: um item por bloco que a coordenação enxerga. "Leituras do dia" é um
+// item só, guardado como uma leitura por posição marcada (1ª, salmo, 2ª, evangelho).
+interface Item { key: string, kind: TemplateKindKey, title: string, body: string, loc: boolean, dutyId: string | null, slots: string[] }
+const form = reactive({ name: '', kind: 'regular' })
+const items = ref<Item[]>([])
 const baseline = ref('')
 const openKey = ref<string | null>(null)
-const ser = () => JSON.stringify([form, blocks.value.map((b) => [b.type, b.title, b.body, b.textSource, b.dutyId])])
+let seq = 0
+const newKey = () => `i${++seq}`
+
+function slotOf(title: string) {
+  const t = title.toLowerCase()
+  if (t.includes('salmo')) return 'psalm'
+  if (t.includes('evangel')) return 'gospel'
+  if (t.includes('segunda') || t.includes('2ª') || t.includes('epístola')) return 'second_reading'
+  return 'first_reading'
+}
+function fromBlocks(blocks: RawBlock[]): Item[] {
+  const out: Item[] = []
+  for (const b of blocks) {
+    if (b.type === 'reading' || b.type === 'psalm') {
+      const last = out.at(-1)
+      const slot = slotOf(b.title)
+      if (last?.kind === 'readings') {
+        if (!last.slots.includes(slot)) last.slots.push(slot)
+      } else {
+        out.push({ key: newKey(), kind: 'readings', title: 'Leituras do dia', body: '', loc: false, dutyId: b.dutyId, slots: [slot] })
+      }
+      continue
+    }
+    const kind: TemplateKindKey = b.type === 'heading' ? (b.textSource === 'estevao' ? 'sunday' : 'heading') : (b.type as TemplateKindKey)
+    out.push({ key: newKey(), kind: kind in BLOCK_KINDS ? kind : 'text', title: b.title, body: b.body ?? '', loc: b.textSource === 'loc_manual', dutyId: b.dutyId, slots: [] })
+  }
+  return out
+}
+interface TplBlock { type: string, title: string, body: string | null, textSource: string, dutyId: string | null }
+function toBlocks(list: Item[]) {
+  return list.flatMap((it): TplBlock[] => {
+    const title = it.title.trim() || BLOCK_KINDS[it.kind].label
+    switch (it.kind) {
+      case 'heading': return [{ type: 'heading', title, body: null, textSource: 'church', dutyId: null }]
+      case 'sunday': return [{ type: 'heading', title: 'Nome do domingo', body: null, textSource: 'estevao', dutyId: null }]
+      case 'rite':
+      case 'text': return [{ type: it.kind, title, body: it.body.trim() || null, textSource: it.loc ? 'loc_manual' : 'church', dutyId: it.dutyId }]
+      case 'collect': return [{ type: 'collect', title, body: null, textSource: 'estevao', dutyId: it.dutyId }]
+      case 'readings': return READING_SLOTS.filter((s) => it.slots.includes(s.slot)).map((s) => ({ type: s.type, title: s.title, body: null, textSource: 'estevao', dutyId: it.dutyId }))
+      default: return [{ type: it.kind, title, body: null, textSource: 'church', dutyId: it.dutyId }]
+    }
+  })
+}
+const ser = () => JSON.stringify([form, toBlocks(items.value)])
 watch(data, (d) => {
   const t = d?.template
   if (!t) return
-  Object.assign(form, { name: t.name, kind: t.kind, description: t.description })
-  blocks.value = t.blocks.map((b) => ({ key: b.id, type: b.type, title: b.title, body: b.body, textSource: b.textSource, dutyId: b.dutyId }))
+  Object.assign(form, { name: t.name, kind: t.kind })
+  items.value = fromBlocks(t.blocks)
   baseline.value = ser()
 }, { immediate: true })
 const dirty = computed(() => ser() !== baseline.value)
 onBeforeRouteLeave(() => (dirty.value ? window.confirm('Sair sem salvar o modelo?') : true))
 
 const dutyName = (dutyId: string | null) => data.value?.duties.find((d) => d.id === dutyId)?.name
+const dutyOfKind = (k: string) => data.value?.duties.find((d) => d.kind === k)?.id ?? null
+function subOf(it: Item) {
+  const k = BLOCK_KINDS[it.kind]
+  const parts = [k.estevao ? 'Vem do Estêvão' : it.loc ? 'Texto do Livro de Oração' : 'Da igreja']
+  if (it.kind === 'readings') parts.push(READING_SLOTS.filter((s) => it.slots.includes(s.slot)).map((s) => s.title).join(', ') || 'nenhuma leitura marcada')
+  if (k.hasDuty && dutyName(it.dutyId)) parts.push(dutyName(it.dutyId)!)
+  return parts.join(' · ')
+}
 function move(i: number, dir: -1 | 1) {
   const j = i + dir
-  if (j < 0 || j >= blocks.value.length) return
-  const list = [...blocks.value]
+  if (j < 0 || j >= items.value.length) return
+  const list = [...items.value]
   ;[list[i], list[j]] = [list[j]!, list[i]!]
-  blocks.value = list
+  items.value = list
 }
 function remove(i: number) {
-  blocks.value = blocks.value.filter((_, k) => k !== i)
+  items.value = items.value.filter((_, k) => k !== i)
 }
+function toggleSlot(it: Item, slot: string) {
+  it.slots = it.slots.includes(slot) ? it.slots.filter((s) => s !== slot) : [...it.slots, slot]
+}
+
 const adding = ref(false)
-function add(type: string) {
-  const k = BLOCK_KINDS[type]!
-  const key = `new-${Date.now()}`
-  blocks.value = [...blocks.value, { key, type, title: k.label, body: null, textSource: k.source, dutyId: null }]
+const hasReadings = computed(() => items.value.some((i) => i.kind === 'readings'))
+const GROUPS: { title: string, sub: string, kinds: TemplateKindKey[] }[] = [
+  { title: 'Da igreja', sub: 'Texto que vocês escrevem uma vez e vale para todo culto deste modelo.', kinds: ['heading', 'rite', 'sermon', 'music', 'announcements', 'text'] },
+  { title: 'Vem do Estêvão', sub: 'Preenchido a cada domingo, conforme o calendário e o lecionário.', kinds: ['sunday', 'collect', 'readings'] },
+]
+function add(kind: TemplateKindKey) {
+  const key = newKey()
+  const dutyId = kind === 'readings' ? dutyOfKind('reading') : kind === 'sermon' ? dutyOfKind('sermon') : kind === 'music' ? dutyOfKind('music') : null
+  items.value = [...items.value, {
+    key,
+    kind,
+    title: kind === 'sunday' ? 'Nome do domingo' : BLOCK_KINDS[kind].label,
+    body: '',
+    loc: false,
+    dutyId,
+    slots: kind === 'readings' ? READING_SLOTS.map((s) => s.slot) : [],
+  }]
   adding.value = false
   openKey.value = key
 }
@@ -55,9 +126,13 @@ async function save() {
     toast.error('Dê um nome ao modelo.')
     return
   }
+  if (items.value.some((i) => i.kind === 'readings' && !i.slots.length)) {
+    toast.error('Em "Leituras do dia", marque ao menos uma leitura.')
+    return
+  }
   saving.value = true
   try {
-    await capi(`/templates/${id}`, { method: 'PATCH', body: { name: form.name, kind: form.kind, blocks: blocks.value.map((b) => ({ type: b.type, title: b.title.trim() || BLOCK_KINDS[b.type]!.label, body: b.textSource === 'estevao' ? null : b.body, textSource: b.textSource, dutyId: b.dutyId })) } })
+    await capi(`/templates/${id}`, { method: 'PATCH', body: { name: form.name, kind: form.kind, blocks: toBlocks(items.value) } })
     toast.ok('Modelo salvo. Roteiros já criados não mudam.')
     await refresh()
   } catch (e) {
@@ -85,7 +160,7 @@ async function save() {
         maxlength="120"
       >
       <p class="lede">
-        Toque em um bloco para editar. Setas mudam a ordem.
+        A ordem do culto. Toque em um bloco para editar; setas mudam a ordem.
       </p>
     </div>
 
@@ -115,13 +190,13 @@ async function save() {
     </div>
 
     <ol
-      v-if="blocks.length"
+      v-if="items.length"
       class="stack-sm"
       style="list-style:none;margin:0;padding:0;gap:8px"
     >
       <li
-        v-for="(b, i) in blocks"
-        :key="b.key"
+        v-for="(it, i) in items"
+        :key="it.key"
         class="card card--flush"
       >
         <div
@@ -135,7 +210,7 @@ async function save() {
             <button
               type="button"
               class="arrowbtn"
-              :aria-label="`Subir ${b.title}`"
+              :aria-label="`Subir ${it.title}`"
               :disabled="i === 0"
               @click="move(i, -1)"
             ><Icon
@@ -145,8 +220,8 @@ async function save() {
             <button
               type="button"
               class="arrowbtn"
-              :aria-label="`Descer ${b.title}`"
-              :disabled="i === blocks.length - 1"
+              :aria-label="`Descer ${it.title}`"
+              :disabled="i === items.length - 1"
               @click="move(i, 1)"
             ><Icon
               name="chevron-down"
@@ -157,25 +232,26 @@ async function save() {
             type="button"
             class="row"
             style="flex:1;min-width:0;gap:10px;flex-wrap:nowrap;border:0;background:transparent;padding:4px 0;text-align:left;color:inherit"
-            :aria-expanded="openKey === b.key"
-            @click="openKey = openKey === b.key ? null : b.key"
+            :aria-expanded="openKey === it.key"
+            @click="openKey = openKey === it.key ? null : it.key"
           >
             <span
               class="stag"
-              :style="{ background: BLOCK_KINDS[b.type]?.bg, color: BLOCK_KINDS[b.type]?.fg, flex: 'none' }"
-            >{{ BLOCK_KINDS[b.type]?.label ?? b.type }}</span>
+              :style="{ background: BLOCK_KINDS[it.kind].bg, color: BLOCK_KINDS[it.kind].fg, flex: 'none' }"
+            >{{ BLOCK_KINDS[it.kind].label }}</span>
             <span style="flex:1;min-width:0">
               <span
+                v-if="it.kind !== 'readings' && it.kind !== 'sunday'"
                 class="strong"
                 style="display:block"
-              >{{ b.title }}</span>
+              >{{ it.title }}</span>
               <span
                 class="muted"
                 style="display:block;font-size:13px"
-              >{{ SOURCE_SHORT[b.textSource] ?? b.textSource }}{{ dutyName(b.dutyId) ? ` · ${dutyName(b.dutyId)}` : '' }}</span>
+              >{{ subOf(it) }}</span>
             </span>
             <Icon
-              :name="openKey === b.key ? 'chevron-up' : 'chevron-down'"
+              :name="openKey === it.key ? 'chevron-up' : 'chevron-down'"
               class="listrow__chev"
             />
           </button>
@@ -183,7 +259,7 @@ async function save() {
             type="button"
             class="icon-btn icon-btn--round icon-btn--sm"
             style="background:var(--surface-2);color:var(--muted)"
-            :aria-label="`Tirar ${b.title}`"
+            :aria-label="`Tirar ${it.title}`"
             @click="remove(i)"
           >
             <Icon
@@ -192,68 +268,101 @@ async function save() {
             />
           </button>
         </div>
+
         <div
-          v-if="openKey === b.key"
+          v-if="openKey === it.key"
           class="stack-md"
           style="padding:12px 14px 14px;border-top:1px solid var(--line-2)"
         >
-          <label class="field">
-            <span class="field__label">Título</span>
+          <p
+            v-if="BLOCK_KINDS[it.kind].estevao"
+            class="soft"
+            style="font-size:14px;background:#e3ebf8;color:#23467f;border-radius:12px;padding:10px 12px"
+          >
+            <template v-if="it.kind === 'sunday'">
+              O nome da semana chega do Estêvão a cada domingo, com o Próprio no Tempo Comum (ex.: “19º Domingo no Tempo Comum (Próprio 23)”). Não precisa digitar.
+            </template>
+            <template v-else-if="it.kind === 'collect'">
+              A coleta própria do domingo chega do Estêvão; no roteiro dá para trocar por outra do dia ou editar.
+            </template>
+            <template v-else>
+              O Estêvão traz a referência de cada leitura marcada, conforme o lecionário da igreja. No roteiro você escolhe quem lê cada uma.
+            </template>
+          </p>
+
+          <label
+            v-if="it.kind !== 'sunday' && it.kind !== 'readings'"
+            class="field"
+          >
+            <span class="field__label">Título no roteiro</span>
             <input
-              v-model="b.title"
+              v-model="it.title"
               class="input"
               maxlength="200"
             >
           </label>
-          <div>
-            <span class="field__label">De onde vem o texto</span>
-            <div
-              class="chips"
-              role="radiogroup"
-              :aria-label="`Origem do texto de ${b.title}`"
-            >
-              <button
-                v-for="(l, s) in SOURCE_SHORT"
-                :key="s"
-                type="button"
-                role="radio"
-                class="chip"
-                :aria-checked="b.textSource === s"
-                :aria-pressed="b.textSource === s"
-                @click="b.textSource = s"
+
+          <fieldset
+            v-if="it.kind === 'readings'"
+            style="border:0;margin:0;padding:0"
+          >
+            <legend class="field__label">
+              Quais leituras entram neste culto
+            </legend>
+            <div class="stack-sm">
+              <label
+                v-for="s in READING_SLOTS"
+                :key="s.slot"
+                class="check"
               >
-                {{ l }}
-              </button>
+                <input
+                  type="checkbox"
+                  :checked="it.slots.includes(s.slot)"
+                  @change="toggleSlot(it, s.slot)"
+                >
+                <span class="check__text strong">{{ s.title }}</span>
+              </label>
             </div>
-          </div>
+            <p
+              class="field__hint"
+              style="margin-top:6px"
+            >
+              A maioria dos lecionários tem quatro, com o salmo entre a primeira e a segunda. Culto curto costuma ter só o Evangelho.
+            </p>
+          </fieldset>
+
+          <template v-if="BLOCK_KINDS[it.kind].hasText">
+            <label class="field">
+              <span class="field__label">Texto</span>
+              <textarea
+                v-model="it.body"
+                class="textarea"
+                style="min-height:100px;resize:vertical;font-size:15.5px"
+                placeholder="O que vai no roteiro de todo culto deste modelo"
+              />
+            </label>
+            <label class="check">
+              <input
+                v-model="it.loc"
+                type="checkbox"
+              >
+              <span class="check__text">
+                <span class="strong">É texto do Livro de Oração (LOC)</span>
+                <span
+                  class="small muted"
+                  style="display:block"
+                >Marque quando copiar o texto do livro. Ele fica só nesta igreja e não é compartilhado com outras.</span>
+              </span>
+            </label>
+          </template>
+
           <label
-            v-if="b.textSource !== 'estevao'"
+            v-if="BLOCK_KINDS[it.kind].hasDuty"
             class="field"
           >
-            <span class="field__label">Texto</span>
-            <textarea
-              :value="b.body ?? ''"
-              class="textarea"
-              style="min-height:100px;resize:vertical;font-size:15.5px"
-              placeholder="O que vai no roteiro"
-              @input="b.body = ($event.target as HTMLTextAreaElement).value || null"
-            />
-            <span
-              v-if="b.textSource === 'loc_manual'"
-              class="field__hint"
-            >Texto do LOC digitado pela igreja, para uso interno. Não é distribuído a outras igrejas.</span>
-          </label>
-          <p
-            v-else
-            class="soft"
-            style="font-size:14px;background:var(--surface-2);border-radius:12px;padding:10px 12px"
-          >
-            O texto chega do Estêvão a cada domingo — não precisa digitar.
-          </p>
-          <label class="field">
             <span class="field__label">Quem faz</span>
             <select
-              v-model="b.dutyId"
+              v-model="it.dutyId"
               class="select"
             >
               <option :value="null">Ninguém em especial</option>
@@ -263,6 +372,7 @@ async function save() {
                 :value="d.id"
               >{{ d.name }}</option>
             </select>
+            <span class="field__hint">A pessoa escalada nessa função aparece no roteiro.</span>
           </label>
         </div>
       </li>
@@ -308,24 +418,39 @@ async function save() {
       title="Que tipo de bloco?"
     >
       <div
-        style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-top:14px"
+        v-for="g in GROUPS"
+        :key="g.title"
+        style="margin-top:14px"
       >
-        <button
-          v-for="(k, t) in BLOCK_KINDS"
-          :key="t"
-          type="button"
-          class="suggest"
-          @click="add(t)"
+        <p class="caps">
+          {{ g.title }}
+        </p>
+        <p
+          class="small muted"
+          style="margin:2px 0 8px"
         >
-          <span
-            class="stag"
-            :style="{ background: k.bg, color: k.fg }"
-          >{{ k.label }}</span>
-          <span
-            class="soft"
-            style="font-size:13px"
-          >{{ k.sub }}</span>
-        </button>
+          {{ g.sub }}
+        </p>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px">
+          <button
+            v-for="k in g.kinds"
+            :key="k"
+            type="button"
+            class="suggest"
+            :disabled="k === 'readings' && hasReadings"
+            :title="k === 'readings' && hasReadings ? 'Este modelo já tem as leituras do dia' : undefined"
+            @click="add(k)"
+          >
+            <span
+              class="stag"
+              :style="{ background: BLOCK_KINDS[k].bg, color: BLOCK_KINDS[k].fg }"
+            >{{ BLOCK_KINDS[k].label }}</span>
+            <span
+              class="soft"
+              style="font-size:13px"
+            >{{ BLOCK_KINDS[k].sub }}</span>
+          </button>
+        </div>
       </div>
     </Sheet>
   </div>

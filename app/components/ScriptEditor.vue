@@ -268,7 +268,12 @@ async function applyEstevao(body: Record<string, unknown>) {
 async function fillReadings() {
   const e = await fetchEstevao()
   if (!e) return
-  const chosen = e.suggestion.readings.filter((r) => r.key !== 'psalm_alternative').map((r) => ({ key: r.key, reference: r.reference, label: r.label, alternatives: r.alternatives }))
+  // O modelo diz quais posições entram (ex.: sem a segunda leitura). Sem posições marcadas, entram todas.
+  const alias: Record<string, string> = { old_testament: 'first_reading', epistle: 'second_reading' }
+  const wanted = new Set(readings.value.map((r) => r.data.slot).filter((x): x is string => Boolean(x)))
+  const chosen = e.suggestion.readings
+    .filter((r) => r.key !== 'psalm_alternative' && (!wanted.size || wanted.has(alias[r.key] ?? r.key)))
+    .map((r) => ({ key: r.key, reference: r.reference, label: r.label, alternatives: r.alternatives }))
   const hasCollect = Boolean(blocks.value.find((b) => b.type === 'collect')?.body)
   await applyEstevao({ snapshotId: e.snapshotId, collectIndex: hasCollect || !e.suggestion.collects.length ? null : 0, readings: chosen, replaceReadings: true, applyCalendar: true })
   toast.ok('Leituras do Estêvão no roteiro. Toque em quem lê.')

@@ -610,6 +610,8 @@ export interface ScriptBlockData {
   alternatives?: string[]
   readingText?: string
   source?: 'estevao' | 'manual'
+  // Posição da leitura no lecionário: first_reading | psalm | second_reading | gospel.
+  slot?: string
   songIds?: string[]
   // Avisos: "fixed" volta automaticamente nos próximos roteiros (todo domingo).
   items?: { text: string, ownerPersonId?: string | null, status?: 'draft' | 'ready', fixed?: boolean }[]
