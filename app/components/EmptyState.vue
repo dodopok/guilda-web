@@ -3,14 +3,23 @@ defineProps<{ title: string, text?: string }>()
 </script>
 
 <template>
-  <div class="empty">
-    <h3>{{ title }}</h3>
-    <p v-if="text">
+  <div class="card--dashed">
+    <p
+      class="strong"
+      style="font-size:18px"
+    >
+      {{ title }}
+    </p>
+    <p
+      v-if="text"
+      class="soft"
+      style="margin:6px auto 0;max-width:400px"
+    >
       {{ text }}
     </p>
     <div
       v-if="$slots.default"
-      class="row"
+      style="margin-top:16px"
     >
       <slot />
     </div>

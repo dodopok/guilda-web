@@ -23,35 +23,40 @@ async function submit() {
     id="conteudo"
     class="door"
   >
-    <div class="door__box">
-      <BrandMark class="door__mark" />
-      <h1>Nova igreja</h1>
-      <p class="lede">
-        Cada igreja tem dados, mensagens e configurações separados. A primeira pessoa da coordenação recebe o convite depois que o canal de WhatsApp da igreja estiver configurado.
-      </p>
+    <div class="door__card door__card--md stack-lg">
+      <DoorHead />
+      <div>
+        <h1
+          class="h1"
+          style="font-size:28px"
+        >
+          Nova igreja
+        </h1>
+        <p
+          class="soft"
+          style="margin-top:6px"
+        >
+          Cada igreja tem dados, mensagens e configurações separados. A pessoa da coordenação faz a configuração inicial no primeiro acesso.
+        </p>
+      </div>
       <div
         v-if="created"
-        class="notice notice--ok"
-        style="margin-top:1.5rem"
+        class="panel panel--ok stack-sm"
       >
         <p>Igreja criada em <code>/i/{{ created.slug }}</code>.</p>
         <template v-if="created.inviteLink">
-          <p style="margin-top:.5rem">
-            Entregue este convite <strong>somente à pessoa da coordenação</strong>. Ele vale 72 horas, é de uso único e não será mostrado de novo:
-          </p>
-          <p style="margin-top:.5rem;word-break:break-all">
+          <p>Entregue este convite <strong>somente à pessoa da coordenação</strong>. Ele vale 72 horas, é de uso único e não será mostrado de novo:</p>
+          <p style="word-break:break-all">
             <code>{{ created.inviteLink }}</code>
           </p>
         </template>
-        <p
-          v-else
-          style="margin-top:.5rem"
-        >
+        <p v-else>
           Você já faz parte da coordenação desta igreja.
         </p>
       </div>
       <form
         v-else
+        class="stack-md"
         @submit.prevent="submit"
       >
         <label class="field"><span class="field__label">Nome</span><input
@@ -85,16 +90,16 @@ async function submit() {
           inputmode="tel"
           required
         ></label>
-        <button
-          class="btn btn--primary btn--block"
-          style="margin-top:1.5rem"
-        >
+        <button class="btn btn--block">
           Cadastrar igreja
         </button>
       </form>
-      <p style="margin-top:1.5rem">
-        <NuxtLink to="/">Voltar</NuxtLink>
-      </p>
+      <NuxtLink
+        to="/"
+        class="link"
+      >
+        Voltar
+      </NuxtLink>
     </div>
   </main>
 </template>

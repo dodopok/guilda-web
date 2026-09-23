@@ -1,6 +1,6 @@
 <script setup lang="ts">
 const model = defineModel<string>({ required: true })
-const props = defineProps<{ label: string, autocomplete: string, hint?: string, id?: string, minlength?: number }>()
+const props = defineProps<{ label: string, autocomplete: string, hint?: string, id?: string, minlength?: number, placeholder?: string }>()
 const shown = ref(false)
 const uid = useId()
 const fieldId = computed(() => props.id ?? uid)
@@ -16,18 +16,19 @@ const fieldId = computed(() => props.id ?? uid)
       <input
         :id="fieldId"
         v-model="model"
-        class="input"
+        class="input input--lg"
         :type="shown ? 'text' : 'password'"
         :autocomplete="autocomplete"
         :minlength="minlength"
+        :placeholder="placeholder"
         required
-        style="padding-right:5.5rem"
+        style="padding-right:92px"
         :aria-describedby="hint ? `${fieldId}-hint` : undefined"
       >
       <button
         type="button"
-        class="btn btn--quiet btn--small"
-        style="position:absolute;right:.3rem;top:.3rem"
+        class="link link--muted"
+        style="position:absolute;right:14px;top:50%;transform:translateY(-50%)"
         :aria-pressed="shown"
         @click="shown = !shown"
       >

@@ -1,85 +1,62 @@
 <script setup lang="ts">
 import type { Task } from '~/types'
 
-useHead({ title: 'Minhas escalas' })
+useHead({ title: 'Suas escalas' })
 const route = useRoute()
-const { capi, tz } = useChurch()
-const { data, refresh } = await useAsyncData(`tasks-${route.params.slug}`, () => capi<{ tasks: Task[] }>('/me/tasks'))
-const { respond, busy } = useRespond(refresh)
-const declining = ref<Task | null>(null)
-async function decline(note: string) {
-  if (!declining.value) return
-  await respond(declining.value, 'declined', note)
-  declining.value = null
-}
-const days = computed(() => {
-  const byDay = new Map<string, Task[]>()
-  for (const t of data.value?.tasks ?? []) {
-    const k = localDateKey(t.service.startsAt, tz.value)
-    byDay.set(k, [...(byDay.get(k) ?? []), t])
-  }
-  return [...byDay.values()]
+const { capi, tz, link } = useChurch()
+const { data } = await useAsyncData(`tasks-${route.params.slug}`, () => capi<{ tasks: Task[] }>('/me/tasks'))
+const groups = computed(() => {
+  const map = new Map<string, Task[]>()
+  for (const t of data.value?.tasks ?? []) map.set(t.service.id, [...(map.get(t.service.id) ?? []), t])
+  return [...map.values()]
 })
-const pending = computed(() => (data.value?.tasks ?? []).filter((t) => t.status === 'pending').length)
+const STATUS: Record<string, string> = { pending: 'A confirmar', confirmed: 'Confirmado', declined: 'Não pode' }
 </script>
 
 <template>
-  <div class="page">
-    <div class="page-head">
-      <p class="kicker">
-        Suas escalas
-      </p>
-      <h1>Minhas escalas</h1>
+  <section class="stack-lg w-640">
+    <BackLink
+      :to="link('')"
+      label="Início"
+    />
+    <h1 class="h1--sm">
+      Suas escalas
+    </h1>
+    <div
+      v-if="!groups.length"
+      class="card--dashed"
+    >
       <p
-        v-if="pending"
-        class="lede"
+        class="strong"
+        style="font-size:18px"
       >
-        {{ pending === 1 ? 'Uma tarefa espera sua confirmação.' : `${pending} tarefas esperam sua confirmação.` }}
-      </p>
-      <p
-        v-else-if="days.length"
-        class="lede"
-      >
-        Tudo respondido. Obrigado por servir!
+        Nenhuma escala com seu nome por enquanto
       </p>
     </div>
-    <EmptyState
-      v-if="!days.length"
-      title="Nenhuma escala por enquanto"
-      text="Quando a coordenação publicar uma escala com seu nome, ela aparece aqui."
-    />
-    <ul
-      v-else
-      class="agenda"
-    >
-      <li
-        v-for="day in days"
-        :key="day[0]!.assignmentId"
+    <div class="stack-sm">
+      <NuxtLink
+        v-for="g in groups"
+        :key="g[0]!.service.id"
+        :to="link(`/tarefas/${g[0]!.assignmentId}`)"
+        class="card row"
+        style="flex-wrap:nowrap;gap:14px;text-decoration:none;color:inherit"
       >
-        <DateBlock
-          :at="day[0]!.service.startsAt"
+        <DateTile
+          :date="g[0]!.service.startsAt"
           :tz="tz"
         />
-        <div>
-          <p class="sr-only">
-            {{ longDate(day[0]!.service.startsAt, tz) }}
-          </p>
-          <TaskItem
-            v-for="t in day"
-            :key="t.assignmentId"
-            :task="t"
-            :busy="busy === t.assignmentId"
-            @confirm="respond(t, 'confirmed')"
-            @decline="declining = t"
-          />
-        </div>
-      </li>
-    </ul>
-    <DeclineSheet
-      :task="declining"
-      :busy="Boolean(busy)"
-      @close="declining = null"
-      @decline="decline"
-    />
-  </div>
+        <span class="grow"><span
+          class="strong"
+          style="display:block"
+        >{{ g.map((t) => t.duty.name).join(' · ') }}</span><span
+          class="soft small"
+          style="display:block"
+        >{{ g[0]!.service.title }} · {{ time(g[0]!.service.startsAt, tz) }}</span></span>
+        <span
+          class="status"
+          :class="`status--${g[0]!.status}`"
+        >{{ STATUS[g[0]!.status] }}</span>
+      </NuxtLink>
+    </div>
+  </section>
 </template>

@@ -38,7 +38,7 @@ export interface PersonFixture {
 }
 
 export async function makeChurch(db: Db, slug: string, opts: { withAccounts?: boolean } = {}) {
-  const [church] = await db.insert(churches).values({ slug, name: `Igreja ${slug}`, timezone: 'America/Sao_Paulo', defaultLocation: 'Salão principal' }).returning()
+  const [church] = await db.insert(churches).values({ slug, name: `Igreja ${slug}`, timezone: 'America/Sao_Paulo', defaultLocation: 'Salão principal', setupCompletedAt: new Date() }).returning()
   await db.insert(whatsappChannels).values({ churchId: church!.id, mode: 'simulation' })
   const ms: Record<string, string> = {}
   for (const [i, name] of ['Liturgia', 'Louvor', 'Mídia', 'Café'].entries()) {

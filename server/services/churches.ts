@@ -82,6 +82,7 @@ export const updateChurchSchema = z.object({
   confirmationDeadlineHours: z.number().int().min(0).max(24 * 14).optional(),
   liturgicalPrayerBook: z.string().trim().min(2).max(40).optional(),
   liturgicalReadingType: z.enum(['complementary', 'semicontinuous']).optional(),
+  accentColor: z.string().trim().toLowerCase().regex(/^#[0-9a-f]{6}$/, 'Use uma cor no formato #rrggbb.').optional(),
 })
 
 export async function updateChurch(db: Db, ctx: ChurchContext, input: z.infer<typeof updateChurchSchema>) {
@@ -109,5 +110,7 @@ export function publicChurch(church: typeof churches.$inferSelect) {
     confirmationDeadlineHours: church.confirmationDeadlineHours,
     liturgicalPrayerBook: church.liturgicalPrayerBook,
     liturgicalReadingType: church.liturgicalReadingType,
+    accentColor: church.accentColor,
+    setupCompleted: Boolean(church.setupCompletedAt),
   }
 }

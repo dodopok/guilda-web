@@ -47,12 +47,26 @@ export const churches = pgTable('churches', {
   // Preferências litúrgicas usadas na consulta ao Estêvão.
   liturgicalPrayerBook: text('liturgical_prayer_book').notNull().default('loc_2027'),
   liturgicalReadingType: text('liturgical_reading_type').notNull().default('complementary'),
+  // Identidade visual: cor da igreja (hex) usada nos botões e destaques do app.
+  accentColor: text('accent_color').notNull().default('#2c5a41'),
+  // Configuração inicial concluída pela coordenação (nula em igreja recém-criada).
+  setupCompletedAt: ts('setup_completed_at'),
   createdAt: createdAt(),
 }, (t) => [
+  check('churches_accent_color', sql`${t.accentColor} ~ '^#[0-9a-f]{6}$'`),
   check('churches_reminder_weekday', sql`${t.reminderWeekday} between 0 and 6`),
   check('churches_reminder_time', sql`${t.reminderTime} ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'`),
   check('churches_slug', sql`${t.slug} ~ '^[a-z0-9]+(-[a-z0-9]+)*$'`),
 ])
+
+// Logo da igreja, fora da tabela principal para não pesar nas consultas. Só PNG, JPEG ou
+// WebP (conferidos pelos bytes iniciais), já reduzido no navegador.
+export const churchLogos = pgTable('church_logos', {
+  churchId: uuid('church_id').primaryKey().references(() => churches.id, { onDelete: 'cascade' }),
+  mime: text('mime').notNull(),
+  dataBase64: text('data_base64').notNull(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+})
 
 export const accounts = pgTable('accounts', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -588,10 +602,14 @@ export const serviceScripts = pgTable('service_scripts', {
 
 export interface ScriptBlockData {
   reference?: string
+  alternatives?: string[]
   readingText?: string
   source?: 'estevao' | 'manual'
   songIds?: string[]
-  items?: { text: string, ownerPersonId?: string | null, status?: 'draft' | 'ready' }[]
+  // Avisos: "fixed" volta automaticamente nos próximos roteiros (todo domingo).
+  items?: { text: string, ownerPersonId?: string | null, status?: 'draft' | 'ready', fixed?: boolean }[]
+  // Texto do modelo no momento da criação, para "voltar ao padrão" num rito adaptado.
+  templateBody?: string | null
 }
 
 export const scriptBlocks = pgTable('script_blocks', {

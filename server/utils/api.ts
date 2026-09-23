@@ -123,3 +123,12 @@ export function sessionResponse(event: H3Event, client: 'web' | 'native', token:
   }
   return { token, expiresAt }
 }
+
+// Resposta de imagem do logo: tipo conferido no envio, sem interpretação pelo navegador.
+export function sendLogo(event: H3Event, logo: { mime: string, bytes: Buffer }) {
+  setHeader(event, 'Content-Type', logo.mime)
+  setHeader(event, 'Content-Length', logo.bytes.length)
+  setHeader(event, 'Cache-Control', 'private, max-age=86400')
+  setHeader(event, 'Content-Security-Policy', 'default-src \'none\'; sandbox')
+  setHeader(event, 'X-Content-Type-Options', 'nosniff')
+}

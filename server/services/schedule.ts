@@ -105,7 +105,7 @@ export async function getScheduleEditor(db: Db, ctx: ChurchContext, month: strin
         })),
       })),
     })),
-    duties: data.duties.map((d) => ({ id: d.id, name: d.name, ministryId: d.ministryId, kind: d.kind, active: d.active })),
+    duties: data.duties.map((d) => ({ id: d.id, name: d.name, ministryId: d.ministryId, kind: d.kind, active: d.active, arrivalMinutesBefore: d.arrivalMinutesBefore })),
     ministries: ministryRows.map((m) => ({ id: m.id, name: m.name })),
     people: data.people.filter((p) => p.status === 'active').map((p) => ({
       id: p.id,
@@ -423,6 +423,7 @@ export async function getPublishedMonth(db: Db, ctx: ChurchContext, month: strin
     monthLabel: monthName(month),
     published,
     version: data.scheduleMonth?.version ?? 0,
+    publishedAt: data.scheduleMonth?.publishedAt ?? null,
     services: data.services.map((s) => ({
       id: s.id,
       title: s.title,
@@ -434,6 +435,7 @@ export async function getPublishedMonth(db: Db, ctx: ChurchContext, month: strin
       status: s.status,
       slots: data.slots.filter((sl) => sl.serviceId === s.id).map((sl) => ({
         id: sl.id,
+        dutyId: sl.dutyId,
         dutyName: dutyOf.get(sl.dutyId)?.name ?? '',
         arrivalAt: arrivalFor(s.startsAt, sl.arrivalAt, dutyOf.get(sl.dutyId)?.arrivalMinutesBefore ?? null),
         requiredCount: sl.requiredCount,

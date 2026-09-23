@@ -57,218 +57,242 @@ const CHANNEL: Record<string, string> = { app: 'pelo app', coordination: 'regist
 </script>
 
 <template>
-  <div class="page">
-    <p
-      class="no-print"
-      style="margin-bottom:1rem"
-    >
-      <NuxtLink :to="link('/tarefas')"><Icon
-        name="arrow-left"
-        style="width:1rem;height:1rem;vertical-align:-.15em"
-      /> Minhas escalas</NuxtLink>
-    </p>
-    <EmptyState
+  <section class="stack-lg w-640">
+    <BackLink
+      :to="link('')"
+      label="Início"
+    />
+    <div
       v-if="!task"
-      title="Tarefa não encontrada"
-      text="Ela pode ter passado, sido trocada ou retirada da escala."
+      class="card--dashed"
     >
-      <NuxtLink
-        class="btn"
-        :to="link('/tarefas')"
-      >Ver minhas escalas</NuxtLink>
-    </EmptyState>
-    <template v-else>
-      <div class="page-head">
-        <p class="kicker">
-          {{ task.duty.ministry }}
-        </p>
-        <h1>{{ task.duty.name }}</h1>
-        <p class="lede">
-          {{ longDate(task.service.startsAt, tz) }} · {{ task.service.title }} às {{ time(task.service.startsAt, tz) }}
-        </p>
-      </div>
-      <dl class="dl">
-        <dt>Chegada</dt>
-        <dd>{{ task.arrivalAt ? time(task.arrivalAt, tz) : 'a combinar com a coordenação' }}</dd>
-        <template v-if="task.service.location">
-          <dt>Local</dt><dd>{{ task.service.location }}</dd>
-        </template>
-        <dt>Situação</dt>
-        <dd><StatusMark :status="task.status" /></dd>
-        <dt>Responder até</dt>
-        <dd>{{ dateTime(task.respondBy, tz) }}</dd>
-      </dl>
-
-      <section class="section">
-        <div class="section-head">
-          <h2>O que fazer</h2>
-        </div>
-        <p style="margin-top:.75rem;white-space:pre-line">
-          {{ task.duty.instructions || 'A coordenação ainda não escreveu instruções para esta função.' }}
-        </p>
-        <p
-          v-if="task.note"
-          style="margin-top:.75rem"
-        >
-          <strong>Observação deste culto:</strong> {{ task.note }}
-        </p>
-      </section>
-
-      <div
-        class="row"
-        style="margin-top:1.75rem"
+      <p
+        class="strong"
+        style="font-size:18px"
       >
-        <template v-if="task.status !== 'confirmed'">
-          <button
-            type="button"
-            class="btn btn--ok"
-            :disabled="busy === task.assignmentId"
-            @click="respond(task, 'confirmed')"
-          >
-            <Icon name="check" /> Confirmar
-          </button>
-        </template>
-        <button
-          v-if="task.status !== 'declined'"
-          type="button"
-          class="btn btn--no"
-          :disabled="busy === task.assignmentId"
-          @click="declining = task"
+        Tarefa não encontrada
+      </p>
+      <p
+        class="soft"
+        style="margin:6px auto 0;max-width:380px"
+      >
+        Ela pode ter passado, sido trocada ou retirada da escala.
+      </p>
+      <NuxtLink
+        :to="link('/tarefas')"
+        class="btn btn--secondary btn--md"
+        style="margin-top:16px"
+      >
+        Ver suas escalas
+      </NuxtLink>
+    </div>
+    <template v-else>
+      <article class="card card--lg card--flush">
+        <div
+          class="row"
+          style="flex-wrap:nowrap;gap:16px;padding:20px;border-bottom:1px solid var(--line-2)"
         >
-          Não posso
-        </button>
-      </div>
+          <DateTile
+            :date="task.service.startsAt"
+            :tz="tz"
+            accent
+            large
+            month
+          />
+          <div class="grow">
+            <h1 style="font-size:22px">
+              {{ task.duty.name }}
+            </h1>
+            <p
+              class="soft"
+              style="margin-top:3px;font-size:15px"
+            >
+              {{ task.service.title }} · {{ longDate(task.service.startsAt, tz) }}, {{ time(task.service.startsAt, tz) }}<template v-if="task.service.location">
+                · {{ task.service.location }}
+              </template>
+            </p>
+          </div>
+        </div>
+        <div style="padding:18px 20px">
+          <span
+            class="status"
+            :class="`status--${task.status}`"
+          >{{ task.status === 'confirmed' ? 'Confirmado' : task.status === 'declined' ? 'Você avisou que não pode' : 'Aguardando sua confirmação' }}</span>
+          <p
+            v-if="task.arrivalAt"
+            style="margin-top:10px"
+          >
+            Chegue às <strong>{{ time(task.arrivalAt, tz) }}</strong>
+          </p>
+          <p
+            v-if="task.duty.instructions"
+            style="margin-top:8px;color:var(--ink-2)"
+          >
+            {{ task.duty.instructions }}
+          </p>
+          <p
+            v-if="task.status === 'pending'"
+            class="small soft"
+            style="margin-top:8px"
+          >
+            Responda até {{ dateTime(task.respondBy, tz) }}.
+          </p>
+          <div
+            v-if="task.status !== 'confirmed'"
+            style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px"
+          >
+            <button
+              type="button"
+              class="btn btn--ok"
+              style="min-height:48px"
+              :disabled="busy === task.assignmentId"
+              @click="respond(task, 'confirmed')"
+            >
+              <Icon
+                name="check"
+                :weight="2.2"
+              />{{ task.status === 'declined' ? 'Posso sim' : 'Confirmar' }}
+            </button>
+            <button
+              v-if="task.status === 'pending'"
+              type="button"
+              class="btn btn--secondary"
+              style="min-height:48px"
+              @click="declining = task"
+            >
+              Não posso
+            </button>
+          </div>
+          <button
+            v-else
+            type="button"
+            class="link"
+            style="margin-top:10px"
+            @click="declining = task"
+          >
+            Imprevisto? Avisar
+          </button>
+        </div>
+      </article>
 
       <section
         id="troca"
-        class="section"
+        class="stack-sm"
       >
-        <div class="section-head">
-          <h2>Pedir para alguém assumir</h2>
+        <div>
+          <h2 class="h3">
+            Pedir para alguém assumir
+          </h2>
+          <p
+            class="soft small"
+            style="margin-top:2px"
+          >
+            Só aparecem pessoas habilitadas para {{ task.duty.name }}. A troca vale quando a pessoa aceitar.
+          </p>
+        </div>
+        <div
+          v-for="s in task.openSwaps"
+          :key="s.id"
+          class="panel panel--soft row"
+        >
+          <p class="grow">
+            Pedido enviado para <strong>{{ s.candidateName }}</strong>.
+          </p>
+          <button
+            type="button"
+            class="link"
+            @click="cancelSwap(s.id)"
+          >
+            Cancelar pedido
+          </button>
+        </div>
+        <div
+          v-if="available.length"
+          class="card card--flush list"
+          role="radiogroup"
+          aria-label="Quem pode assumir"
+        >
+          <button
+            v-for="c in available"
+            :key="c.personId"
+            type="button"
+            class="listrow"
+            role="radio"
+            :aria-checked="chosen === c.personId"
+            :style="chosen === c.personId ? 'background:var(--accent-soft)' : ''"
+            @click="chosen = c.personId"
+          >
+            <span class="av">{{ initials(c.displayName) }}</span>
+            <span class="grow strong">{{ c.displayName }}</span>
+            <Icon
+              v-if="chosen === c.personId"
+              name="check"
+              :weight="2.4"
+              style="width:18px;height:18px;color:var(--accent-deep)"
+            />
+          </button>
         </div>
         <p
-          class="ink-2"
-          style="margin-top:.75rem"
+          v-else
+          class="note"
         >
-          Só aparecem pessoas habilitadas para {{ task.duty.name }}. Nada muda na escala até a pessoa aceitar; aí a troca vale na hora, sem aprovação da coordenação.
+          Ninguém habilitado está livre neste culto. Avise a coordenação pelo botão “Não posso”.
         </p>
-        <ul
-          v-if="task.openSwaps.length"
-          class="lines"
-          style="margin-top:1rem"
+        <details
+          v-if="unavailable.length"
+          class="small soft"
         >
-          <li
-            v-for="s in task.openSwaps"
-            :key="s.id"
-            class="line"
-          >
-            <span class="line__main"><strong>{{ s.candidateName }}</strong> <span class="muted">ainda não respondeu</span></span>
-            <button
-              type="button"
-              class="btn btn--quiet btn--small"
-              @click="cancelSwap(s.id)"
-            >
-              Cancelar pedido
-            </button>
-          </li>
-        </ul>
-        <fieldset style="margin-top:1rem">
-          <legend class="sr-only">
-            Escolha quem pode assumir
-          </legend>
-          <div
-            v-if="available.length"
-            class="choice-list"
-          >
-            <label
-              v-for="c in available"
-              :key="c.personId"
-              class="check"
-            >
-              <input
-                v-model="chosen"
-                type="radio"
-                name="candidate"
-                :value="c.personId"
-              >
-              <span class="check__text"><strong>{{ c.displayName }}</strong></span>
-            </label>
-          </div>
+          <summary style="cursor:pointer;font-weight:700">
+            Habilitados que não podem ({{ unavailable.length }})
+          </summary>
           <p
-            v-else
-            class="muted"
+            v-for="c in unavailable"
+            :key="c.personId"
+            style="margin-top:6px"
           >
-            Ninguém habilitado está livre neste horário. Fale com a coordenação.
+            {{ c.displayName }} — {{ c.problems.join(', ') }}
           </p>
-          <details
-            v-if="unavailable.length"
-            style="margin-top:.75rem"
-          >
-            <summary class="small">
-              Habilitados que não podem ({{ unavailable.length }})
-            </summary>
-            <ul
-              class="lines lines--tight small"
-              style="margin-top:.5rem"
+        </details>
+        <template v-if="chosen">
+          <label class="field">
+            <span class="field__label">Recado <span class="field__opt">(opcional)</span></span>
+            <input
+              v-model="message"
+              class="input"
+              maxlength="300"
+              placeholder="Ex.: vou viajar nesse fim de semana"
             >
-              <li
-                v-for="c in unavailable"
-                :key="c.personId"
-              >
-                {{ c.displayName }} — <span class="muted">{{ c.problems.join('; ') }}</span>
-              </li>
-            </ul>
-          </details>
-        </fieldset>
-        <div
-          v-if="chosen"
-          class="field"
-          style="margin-top:1rem"
-        >
-          <label
-            class="field__label"
-            for="swap-msg"
-          >Recado (opcional)</label>
-          <input
-            id="swap-msg"
-            v-model="message"
-            class="input"
-            maxlength="300"
-            placeholder="Ex.: Tenho uma viagem de família"
+          </label>
+          <button
+            type="button"
+            class="btn"
+            :disabled="sending"
+            @click="propose"
           >
-        </div>
-        <button
-          type="button"
-          class="btn btn--primary"
-          style="margin-top:1rem"
-          :disabled="!chosen || sending"
-          @click="propose"
-        >
-          <Icon name="send" /> Enviar pedido
-        </button>
+            Enviar pedido
+          </button>
+        </template>
       </section>
 
       <section
         v-if="data?.history.length"
-        class="section"
+        class="stack-sm"
       >
-        <div class="section-head">
-          <h2>Histórico</h2>
-        </div>
-        <ul
-          class="lines lines--tight"
-          style="margin-top:.5rem"
-        >
-          <li
+        <p class="section-label">
+          Histórico
+        </p>
+        <div class="card card--flush list">
+          <p
             v-for="(h, i) in data.history"
             :key="i"
             class="small"
+            style="padding:10px 16px"
           >
-            {{ dateTime(h.createdAt, tz) }} — {{ h.personName }} {{ h.decision === 'confirmed' ? 'confirmou' : 'avisou que não pode' }} ({{ CHANNEL[h.channel] ?? h.channel }})<template v-if="h.note">
-              : “{{ h.note }}”
+            {{ dateTime(h.createdAt, tz) }} · {{ h.personName }} {{ h.decision === 'confirmed' ? 'confirmou' : 'avisou que não pode' }} {{ CHANNEL[h.channel] ?? '' }}<template v-if="h.note">
+              — “{{ h.note }}”
             </template>
-          </li>
-        </ul>
+          </p>
+        </div>
       </section>
     </template>
     <DeclineSheet
@@ -277,5 +301,5 @@ const CHANNEL: Record<string, string> = { app: 'pelo app', coordination: 'regist
       @close="declining = null"
       @decline="decline"
     />
-  </div>
+  </section>
 </template>

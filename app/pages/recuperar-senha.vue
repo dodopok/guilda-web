@@ -4,6 +4,11 @@ const login = ref('')
 const sent = ref('')
 const error = ref('')
 const busy = ref(false)
+const brand = ref<RememberedBrand | null>(null)
+onMounted(() => {
+  brand.value = readRememberedBrand()
+})
+useHead(() => ({ htmlAttrs: { style: accentStyle(brand.value?.accent) } }))
 async function submit() {
   error.value = ''
   busy.value = true
@@ -23,63 +28,64 @@ async function submit() {
     id="conteudo"
     class="door"
   >
-    <div class="door__box">
-      <BrandMark class="door__mark" />
-      <h1>Recuperar acesso</h1>
-      <template v-if="sent">
-        <p class="lede">
-          {{ sent }}
+    <div class="door__card stack-lg">
+      <DoorHead
+        :name="brand?.name"
+        :logo="brand?.logo"
+      />
+      <div>
+        <h1
+          class="h1"
+          style="font-size:28px"
+        >
+          Esqueceu a senha?
+        </h1>
+        <p
+          class="soft"
+          style="margin-top:6px"
+        >
+          {{ sent || 'Digite o celular da sua conta. Se ele estiver cadastrado, você recebe um link pelo WhatsApp para criar uma senha nova.' }}
         </p>
-        <p style="margin-top:1rem">
-          O link vale por 30 minutos. Se não chegar, peça à coordenação para reenviar seu acesso.
-        </p>
-        <p style="margin-top:1.5rem">
-          <NuxtLink to="/entrar">Voltar para entrar</NuxtLink>
-        </p>
-      </template>
+      </div>
       <form
-        v-else
+        v-if="!sent"
+        class="stack-md"
         novalidate
         @submit.prevent="submit"
       >
-        <p class="lede">
-          Enviaremos um link pelo WhatsApp para você criar uma senha nova.
-        </p>
-        <div
-          class="field"
-          style="margin-top:1.5rem"
-        >
-          <label
-            class="field__label"
-            for="login"
-          >Seu celular</label>
+        <label class="field">
+          <span class="field__label">Seu celular</span>
           <input
-            id="login"
             v-model="login"
-            class="input"
+            class="input input--lg"
+            type="tel"
             inputmode="tel"
             autocomplete="username"
+            placeholder="(51) 99999-9999"
             required
           >
-        </div>
+        </label>
         <p
           v-if="error"
-          class="field__error"
+          class="form-error"
           role="alert"
         >
           {{ error }}
         </p>
         <button
-          class="btn btn--primary btn--block"
-          style="margin-top:1.5rem"
+          class="btn"
           :disabled="busy"
         >
           Enviar link
         </button>
-        <p style="margin-top:1.5rem">
-          <NuxtLink to="/entrar">Voltar</NuxtLink>
-        </p>
       </form>
+      <NuxtLink
+        to="/entrar"
+        class="link"
+        style="text-align:center;font-size:14.5px"
+      >
+        Voltar para entrar
+      </NuxtLink>
     </div>
   </main>
 </template>

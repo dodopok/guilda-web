@@ -6,6 +6,11 @@ const login = ref('')
 const password = ref('')
 const error = ref('')
 const busy = ref(false)
+const brand = ref<RememberedBrand | null>(null)
+onMounted(() => {
+  brand.value = readRememberedBrand()
+})
+useHead(() => ({ htmlAttrs: { style: accentStyle(brand.value?.accent) } }))
 
 async function submit() {
   error.value = ''
@@ -30,62 +35,74 @@ async function submit() {
     id="conteudo"
     class="door"
   >
-    <div class="door__box">
-      <BrandMark class="door__mark" />
-      <h1>Entrar na Guilda</h1>
-      <p class="lede">
-        Suas escalas, confirmações e o roteiro do culto.
+    <div class="door__card">
+      <DoorHead
+        :name="brand?.name"
+        :logo="brand?.logo"
+      />
+      <h1
+        class="h1"
+        style="margin-top:24px;font-size:28px"
+      >
+        Que bom te ver!
+      </h1>
+      <p
+        class="soft"
+        style="margin-top:6px"
+      >
+        Entre com o celular que recebeu o convite.
       </p>
       <form
+        class="stack-md"
+        style="margin-top:22px"
         novalidate
         @submit.prevent="submit"
       >
-        <div class="field">
-          <label
-            class="field__label"
-            for="login"
-          >Seu celular</label>
+        <label class="field">
+          <span class="field__label">Seu celular</span>
           <input
             id="login"
             v-model="login"
-            class="input"
-            type="text"
+            class="input input--lg"
+            type="tel"
             inputmode="tel"
             autocomplete="username"
             placeholder="(51) 99999-9999"
             required
           >
-          <span class="field__hint">O mesmo número em que você recebeu o convite.</span>
-        </div>
+        </label>
         <PasswordField
           v-model="password"
           label="Senha"
           autocomplete="current-password"
+          placeholder="••••••••••"
         />
         <p
           v-if="error"
-          class="field__error"
+          class="form-error"
           role="alert"
-          style="margin-top:1rem"
         >
           {{ error }}
         </p>
         <button
-          class="btn btn--primary btn--block"
-          style="margin-top:1.5rem"
+          class="btn"
           :disabled="busy"
         >
-          {{ busy ? 'Entrando…' : 'Entrar' }}
+          Entrar
         </button>
+        <NuxtLink
+          to="/recuperar-senha"
+          class="link"
+          style="text-align:center;font-size:14.5px"
+        >
+          Esqueci minha senha
+        </NuxtLink>
       </form>
-      <p style="margin-top:1.5rem">
-        <NuxtLink to="/recuperar-senha">Esqueci minha senha</NuxtLink>
-      </p>
       <p
-        class="muted small"
-        style="margin-top:2.5rem"
+        class="muted"
+        style="margin-top:22px;font-size:13.5px;text-align:center"
       >
-        Ainda não tem acesso? A coordenação da sua igreja envia um convite individual pelo WhatsApp.
+        Ainda não tem acesso? A coordenação da sua igreja te envia um convite pelo WhatsApp.
       </p>
     </div>
   </main>

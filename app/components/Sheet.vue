@@ -1,6 +1,7 @@
 <script setup lang="ts">
-// Folha modal com <dialog> nativo: foco preso, Esc fecha, leitor de tela anuncia o título.
-const props = defineProps<{ open: boolean, title: string, wide?: boolean }>()
+// Folha: sobe de baixo no celular e vira diálogo centralizado no computador. Usa <dialog>
+// nativo (foco preso, Esc fecha, título anunciado).
+const props = defineProps<{ open: boolean, title?: string, lede?: string }>()
 const emit = defineEmits<{ (e: 'update:open', v: boolean): void, (e: 'close'): void }>()
 const el = ref<HTMLDialogElement>()
 const titleId = useId()
@@ -17,41 +18,50 @@ function onClose() {
   emit('update:open', false)
   emit('close')
 }
-function onBackdrop(e: MouseEvent) {
-  if (e.target === el.value) el.value?.close()
-}
 </script>
 
 <template>
   <dialog
     ref="el"
     class="sheet"
-    :style="wide ? 'width:min(56rem,100vw)' : undefined"
-    :aria-labelledby="titleId"
+    :aria-labelledby="title ? titleId : undefined"
     @close="onClose"
-    @click="onBackdrop"
   >
-    <div class="sheet__head">
-      <h2 :id="titleId">
-        {{ title }}
-      </h2>
-      <button
-        type="button"
-        class="btn btn--icon btn--quiet"
-        aria-label="Fechar"
-        @click="el?.close()"
-      >
-        <Icon name="x" />
-      </button>
-    </div>
-    <div class="sheet__body">
-      <slot />
-    </div>
     <div
-      v-if="$slots.foot"
-      class="sheet__foot"
+      class="sheet__wrap"
+      @click.self="el?.close()"
     >
-      <slot name="foot" />
+      <div class="sheet__box">
+        <div class="sheet__close">
+          <button
+            type="button"
+            class="icon-btn icon-btn--round"
+            aria-label="Fechar"
+            @click="el?.close()"
+          >
+            <Icon
+              name="x"
+              :weight="2.2"
+            />
+          </button>
+        </div>
+        <slot name="head">
+          <h2
+            v-if="title"
+            :id="titleId"
+            class="sheet__title"
+          >
+            {{ title }}
+          </h2>
+          <p
+            v-if="lede"
+            class="sheet__lede"
+          >
+            {{ lede }}
+          </p>
+        </slot>
+        <slot />
+      </div>
     </div>
   </dialog>
 </template>

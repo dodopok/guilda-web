@@ -1,225 +1,156 @@
 <script setup lang="ts">
-useHead({ title: 'Escala' })
+useHead({ title: 'Escala da igreja' })
 const route = useRoute()
-const router = useRouter()
-const { capi, tz, link, info, isCoordinator } = useChurch()
+const month = computed(() => String(route.params.month))
+const { capi, tz, link, info } = useChurch()
 
 interface PubPerson { assignmentId: string, personId: string, name: string, status: string }
 interface PubSlot { id: string, dutyName: string, arrivalAt: string | null, requiredCount: number, people: PubPerson[] }
 interface PubService { id: string, title: string, startsAt: string, localDate: string, time: string, location: string | null, kind: string, status: string, slots: PubSlot[] }
-interface PubMonth { month: string, monthLabel: string, published: boolean, version?: number, services: PubService[] }
+interface PubMonth { month: string, monthLabel: string, published: boolean, version: number, publishedAt: string | null, services: PubService[] }
 
-const month = computed({
-  get: () => String(route.params.month),
-  set: (v: string) => router.replace(link(`/escala/${v}`)),
-})
 const { data } = await useAsyncData(() => `pub-${route.params.slug}-${month.value}`, () => capi<PubMonth>(`/schedule/${month.value}/published`), { watch: [month] })
-const myId = computed(() => info.value?.me.personId)
-const onlyMine = ref(false)
-const services = computed(() => (data.value?.services ?? []).map((s) => ({
-  ...s,
-  mine: s.slots.some((sl) => sl.people.some((p) => p.personId === myId.value)),
-})).filter((s) => !onlyMine.value || s.mine))
-const dutyRows = computed(() => {
-  const seen: string[] = []
-  for (const s of services.value) for (const sl of s.slots) if (!seen.includes(sl.dutyName)) seen.push(sl.dutyName)
-  return seen
+const next = computed(() => shiftMonth(currentMonth(tz.value), 1))
+const { data: nextInfo } = await useAsyncData(() => `pub-next-${route.params.slug}-${next.value}`, () => capi<PubMonth>(`/schedule/${next.value}/published`))
+const tabs = computed(() => {
+  const list = [currentMonth(tz.value), next.value]
+  if (!list.includes(month.value)) list.unshift(month.value)
+  return list
 })
+const myId = computed(() => info.value?.me.personId)
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+const visible = computed(() => (data.value?.services ?? []).filter((s) => s.status === 'scheduled'))
 </script>
 
 <template>
-  <div class="page page--wide">
-    <div class="page-head">
-      <p class="kicker">
-        Escala da igreja
-      </p>
-      <div class="row row--between">
-        <h1>Escala</h1>
-        <MonthSwitch
-          v-model="month"
-          class="no-print"
-        />
+  <section class="stack-lg">
+    <div
+      class="row row--between"
+      style="align-items:flex-end;gap:12px"
+    >
+      <div>
+        <p class="eyebrow">
+          Escala da igreja
+        </p>
+        <h1 class="h1--sm">
+          {{ cap(monthName(month)) }}
+        </h1>
       </div>
-      <p
-        v-if="data?.published === false && !isCoordinator"
-        class="lede"
+      <nav
+        class="seg seg--white seg--dark"
+        aria-label="Mês"
       >
-        A escala de {{ monthName(month) }} ainda não foi publicada.
+        <NuxtLink
+          v-for="m in tabs"
+          :key="m"
+          :to="link(`/escala/${m}`)"
+          :aria-current="m === month ? 'page' : undefined"
+        >
+          {{ cap(monthName(m)) }}
+          <span
+            v-if="m === next && nextInfo && !nextInfo.published"
+            class="tag tag--wait"
+            style="font-size:11px"
+          >em preparação</span>
+        </NuxtLink>
+      </nav>
+    </div>
+
+    <template v-if="data">
+      <p
+        v-if="data.published && data.publishedAt"
+        class="soft"
+      >
+        Publicada em {{ dayMonth(data.publishedAt, tz).replace(/^1 /, '1º ') }} · Seu nome aparece destacado.
       </p>
       <p
-        v-else-if="data && !data.published && isCoordinator"
-        class="lede"
+        v-else-if="!data.published && data.services.length"
+        class="panel panel--wait"
+        style="border-radius:18px;padding:14px 18px"
       >
-        Rascunho — só a coordenação vê. <NuxtLink :to="link(`/coordenacao/escalas/${month}`)">Abrir no editor</NuxtLink>
+        <strong>Rascunho</strong> — só a coordenação vê. A escala aparece para todos quando for publicada.
       </p>
-    </div>
-    <div
-      v-if="services.length || onlyMine"
-      class="row no-print"
-      style="margin-bottom:1rem"
-    >
-      <label
-        class="check"
-        style="padding:0"
-      ><input
-        v-model="onlyMine"
-        type="checkbox"
-      > <span>Só os cultos em que eu sirvo</span></label>
-      <span class="spacer" />
-      <button
-        type="button"
-        class="btn btn--small"
-        onclick="window.print()"
+      <div
+        v-if="!visible.length"
+        class="card--dashed"
       >
-        <Icon name="print" /> Imprimir
-      </button>
-    </div>
-    <EmptyState
-      v-if="data?.published !== false && !services.length"
-      :title="onlyMine ? 'Você não está nesta escala' : 'Nenhum culto neste mês'"
-    />
-    <div
-      v-if="services.length"
-      class="only-wide grid-wrap"
-      style="margin-bottom:2rem"
-    >
-      <table class="grid">
-        <caption class="sr-only">
-          Escala de {{ monthLabel(month) }} em grade
-        </caption>
-        <thead>
-          <tr>
-            <th scope="col">
-              Função
-            </th>
-            <th
-              v-for="s in services"
-              :key="s.id"
-              scope="col"
-              class="col-date"
-            >
-              <div class="w">
-                {{ weekdayShort(s.startsAt, tz) }} · {{ time(s.startsAt, tz) }}
-              </div>
-              <div class="d">
-                {{ dayNumber(s.startsAt, tz) }} <span
-                  class="small muted"
-                  style="font-family:var(--sans)"
-                >{{ monthShort(s.startsAt, tz) }}</span>
-              </div>
-              <div
-                v-if="s.kind !== 'regular' || s.status === 'cancelled'"
-                class="small muted"
-              >
-                {{ s.status === 'cancelled' ? 'cancelado' : s.title }}
-              </div>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr
-            v-for="duty in dutyRows"
-            :key="duty"
+        <p
+          class="strong"
+          style="font-size:18px"
+        >
+          {{ data.published ? 'Nenhum culto neste mês' : `${cap(monthName(month))} ainda está sendo montado` }}
+        </p>
+        <p
+          class="soft"
+          style="margin:6px auto 0;max-width:380px"
+        >
+          {{ data.published ? 'Não há cultos cadastrados.' : 'Aparece aqui quando a coordenação publicar.' }}
+        </p>
+      </div>
+      <div class="grid-cards">
+        <article
+          v-for="s in visible"
+          :key="s.id"
+          class="card card--flush"
+        >
+          <div
+            class="row"
+            style="flex-wrap:nowrap;gap:12px;padding:14px 16px;border-bottom:1px solid var(--line-2)"
           >
-            <th scope="row">
-              {{ duty }}
-            </th>
-            <td
-              v-for="s in services"
-              :key="s.id"
-              style="padding:.45rem .6rem"
-            >
-              <template
-                v-for="sl in s.slots.filter((x) => x.dutyName === duty)"
-                :key="sl.id"
+            <span
+              class="dtile dtile--accent"
+              style="width:44px;border-radius:12px;padding:5px 0"
+              aria-hidden="true"
+            ><span
+              class="dtile__day"
+              style="font-size:20px;display:block"
+            >{{ dayNumber(s.startsAt, tz) }}</span><span
+              class="dtile__wd"
+              style="display:block;font-size:10px"
+            >{{ monthShort(s.startsAt, tz) }}</span></span>
+            <div>
+              <p class="strong">
+                {{ cap(longDate(s.startsAt, tz)) }}
+              </p>
+              <p
+                class="soft small"
+                style="margin-top:1px"
               >
-                <div
-                  v-for="p in sl.people"
-                  :key="p.assignmentId"
-                  class="cell__person"
-                >
-                  <span :class="{ 'me-mark': p.personId === myId }">{{ p.name }}</span>
-                  <StatusMark
-                    :status="p.status"
-                    short
-                  />
-                </div>
+                {{ s.title }} · {{ time(s.startsAt, tz) }}
+              </p>
+            </div>
+          </div>
+          <div style="padding:6px 16px 12px">
+            <div
+              v-for="sl in s.slots"
+              :key="sl.id"
+              class="row"
+              style="flex-wrap:nowrap;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid var(--surface-3)"
+            >
+              <span
+                class="grow soft small"
+                style="padding-top:3px"
+              >{{ sl.dutyName }}</span>
+              <span
+                class="row"
+                style="gap:4px;justify-content:flex-end;max-width:60%"
+              >
                 <span
-                  v-if="!sl.people.length"
-                  class="muted"
-                >—</span>
-              </template>
-              <span
-                v-if="!s.slots.some((x) => x.dutyName === duty)"
-                class="muted"
-                aria-label="sem este posto"
-              >·</span>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-    <section
-      v-for="s in services"
-      :key="s.id"
-      class="section only-narrow"
-      style="margin-top:1.75rem"
-    >
-      <div class="section-head">
-        <h2>{{ longDate(s.startsAt, tz) }}</h2>
-        <span class="ink-2">{{ s.title }} · {{ time(s.startsAt, tz) }}</span>
-      </div>
-      <p
-        v-if="s.status === 'cancelled'"
-        class="notice notice--no"
-        style="margin-top:.5rem"
-      >
-        Culto cancelado.
-      </p>
-      <table
-        v-else
-        class="table"
-        style="margin-top:.25rem"
-      >
-        <caption class="sr-only">
-          Escala de {{ longDate(s.startsAt, tz) }}
-        </caption>
-        <tbody>
-          <tr
-            v-for="sl in s.slots"
-            :key="sl.id"
-          >
-            <th
-              scope="row"
-              style="width:40%;font-weight:700"
-            >
-              {{ sl.dutyName }}
-              <span
-                v-if="sl.arrivalAt"
-                class="muted small"
-                style="display:block;font-weight:400"
-              >chegar {{ time(sl.arrivalAt, tz) }}</span>
-            </th>
-            <td>
-              <span
-                v-if="!sl.people.length"
-                class="muted"
-              >—</span>
-              <span
-                v-for="(p, i) in sl.people"
-                :key="p.assignmentId"
-                :style="p.personId === myId ? 'background:var(--accent-wash);padding:0 .25rem;border-radius:3px' : ''"
-              >
-                <strong v-if="p.personId === myId">{{ p.name }} (você)</strong><template v-else>{{ p.name }}</template>
-                <StatusMark
-                  :status="p.status"
-                  short
-                /><template v-if="i < sl.people.length - 1">, </template>
+                  v-for="p in sl.people.filter((x) => x.status !== 'declined')"
+                  :key="p.assignmentId"
+                  class="name-pill"
+                  :class="{ 'name-pill--me': p.personId === myId }"
+                >{{ p.name }}</span>
+                <span
+                  v-if="!sl.people.filter((x) => x.status !== 'declined').length"
+                  class="name-pill"
+                  style="background:transparent;color:var(--muted)"
+                >a definir</span>
               </span>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </section>
-  </div>
+            </div>
+          </div>
+        </article>
+      </div>
+    </template>
+  </section>
 </template>

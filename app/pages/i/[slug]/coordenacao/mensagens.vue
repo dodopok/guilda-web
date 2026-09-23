@@ -73,6 +73,15 @@ const FILTERS = [
 
 <template>
   <div class="page page--wide">
+    <NuxtLink
+      :to="`/i/${$route.params.slug}/coordenacao/configuracoes`"
+      class="back"
+    >
+      <Icon
+        name="arrow-left"
+        :weight="2"
+      />Configurações
+    </NuxtLink>
     <div class="page-head">
       <p class="kicker">
         Comunicação

@@ -3,7 +3,7 @@ import type { Swap } from '~/types'
 
 useHead({ title: 'Pedidos de troca' })
 const route = useRoute()
-const { capi, tz } = useChurch()
+const { capi, tz, link } = useChurch()
 const toast = useToast()
 const { data, refresh } = await useAsyncData(`swaps-${route.params.slug}`, () => capi<{ swaps: Swap[] }>('/me/swaps'))
 const busy = ref<string | null>(null)
@@ -26,86 +26,108 @@ async function answer(s: Swap, accept: boolean) {
 </script>
 
 <template>
-  <div class="page">
-    <div class="page-head">
-      <p class="kicker">
-        Trocas
-      </p>
-      <h1>Pedidos de troca</h1>
-    </div>
-    <EmptyState
-      v-if="!received.length && !others.length"
-      title="Nenhum pedido"
-      text="Quando alguém pedir que você assuma uma tarefa, o pedido aparece aqui."
+  <section class="stack-lg w-640">
+    <BackLink
+      :to="link('')"
+      label="Início"
     />
-    <section v-if="received.length">
-      <div class="section-head">
-        <h2>Para você responder</h2>
-      </div>
-      <ul class="lines">
-        <li
-          v-for="s in received"
-          :key="s.id"
+    <div>
+      <h1 class="h1--sm">
+        Pedidos de troca
+      </h1>
+      <p class="lede">
+        A troca só vale quando a pessoa convidada aceita.
+      </p>
+    </div>
+    <div
+      v-if="!received.length && !others.length"
+      class="card--dashed"
+    >
+      <p
+        class="strong"
+        style="font-size:18px"
+      >
+        Nenhum pedido
+      </p>
+      <p
+        class="soft"
+        style="margin:6px auto 0;max-width:380px"
+      >
+        Quando alguém pedir que você assuma uma tarefa, o pedido aparece aqui.
+      </p>
+    </div>
+    <section
+      v-if="received.length"
+      class="stack-sm"
+    >
+      <p class="section-label">
+        Para você responder
+      </p>
+      <article
+        v-for="s in received"
+        :key="s.id"
+        class="card card--lg stack-sm"
+      >
+        <p style="font-size:17px">
+          <strong>{{ s.fromName }}</strong> pediu que você assuma <strong>{{ s.dutyName }}</strong>
+        </p>
+        <p class="soft">
+          {{ s.serviceTitle }} · {{ longDate(s.startsAt, tz) }}, {{ time(s.startsAt, tz) }}<template v-if="s.location">
+            · {{ s.location }}
+          </template>
+        </p>
+        <p
+          v-if="s.message"
+          class="note"
         >
-          <p><strong>{{ s.fromName }}</strong> pediu que você assuma <strong>{{ s.dutyName }}</strong></p>
-          <p class="ink-2">
-            {{ longDate(s.startsAt, tz) }}, {{ s.serviceTitle }} às {{ time(s.startsAt, tz) }}<template v-if="s.location">
-              · {{ s.location }}
-            </template>
-          </p>
-          <p
-            v-if="s.message"
-            class="ink-2"
-            style="margin-top:.35rem"
+          “{{ s.message }}”
+        </p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:4px">
+          <button
+            type="button"
+            class="btn btn--ok"
+            style="min-height:48px"
+            :disabled="busy === s.id"
+            @click="answer(s, true)"
           >
-            “{{ s.message }}”
-          </p>
-          <div
-            class="btn-pair"
-            style="margin-top:.9rem;max-width:26rem"
+            <Icon
+              name="check"
+              :weight="2.2"
+            />Aceitar
+          </button>
+          <button
+            type="button"
+            class="btn btn--secondary"
+            style="min-height:48px"
+            :disabled="busy === s.id"
+            @click="answer(s, false)"
           >
-            <button
-              type="button"
-              class="btn btn--ok"
-              :disabled="busy === s.id"
-              @click="answer(s, true)"
-            >
-              <Icon name="check" /> Aceitar
-            </button>
-            <button
-              type="button"
-              class="btn"
-              :disabled="busy === s.id"
-              @click="answer(s, false)"
-            >
-              Não posso
-            </button>
-          </div>
-        </li>
-      </ul>
+            Não posso
+          </button>
+        </div>
+      </article>
     </section>
     <section
       v-if="others.length"
-      class="section"
+      class="stack-sm"
     >
-      <div class="section-head">
-        <h2>Anteriores</h2>
-      </div>
-      <ul class="lines lines--tight">
-        <li
+      <p class="section-label">
+        Histórico
+      </p>
+      <div class="card card--flush list">
+        <div
           v-for="s in others"
           :key="s.id"
-          class="line"
+          style="padding:12px 16px"
         >
-          <span class="line__main">
-            <span class="line__title">{{ s.dutyName }} · {{ shortDate(s.startsAt, tz) }}</span>
-            <span
-              class="line__sub"
-              style="display:block"
-            >{{ s.direction === 'sent' ? `Você pediu a ${s.candidateName}` : `${s.fromName} pediu a você` }} — {{ STATUS[s.status] ?? s.status }}</span>
-          </span>
-        </li>
-      </ul>
+          <p style="font-weight:700">
+            {{ s.direction === 'sent' ? `Você pediu a ${s.candidateName}` : `${s.fromName} pediu a você` }}: {{ s.dutyName }}
+          </p>
+          <p class="soft small">
+            {{ longDate(s.startsAt, tz) }} · {{ STATUS[s.status] ?? s.status }}
+          </p>
+        </div>
+      </div>
     </section>
-  </div>
+  </section>
 </template>

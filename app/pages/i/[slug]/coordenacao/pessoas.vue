@@ -1,577 +1,753 @@
 <script setup lang="ts">
 import type { Duty, Ministry, PersonAdmin } from '~/types'
 
-useHead({ title: 'Pessoas' })
+useHead({ title: 'Pessoas e funções' })
 const route = useRoute()
 const router = useRouter()
-const { capi, tz, info } = useChurch()
+const { capi, link, info } = useChurch()
 const toast = useToast()
 
 const { data, refresh } = await useAsyncData(`people-${route.params.slug}`, async () => {
-  const [p, c] = await Promise.all([
-    capi<{ people: PersonAdmin[] }>('/people'),
-    capi<{ ministries: Ministry[], duties: Duty[] }>('/catalog'),
-  ])
-  return { people: p.people, ministries: c.ministries, duties: c.duties }
+  const [people, catalog] = await Promise.all([capi<{ people: PersonAdmin[] }>('/people'), capi<{ ministries: Ministry[], duties: Duty[] }>('/catalog')])
+  return { people: people.people, ministries: catalog.ministries, duties: catalog.duties }
 })
+const tab = computed(() => (route.query.aba === 'funcoes' ? 'funcoes' : 'pessoas'))
+function setTab(t: string) {
+  router.replace({ query: { ...route.query, aba: t === 'funcoes' ? 'funcoes' : undefined } })
+}
+const dutyName = (id: string) => data.value?.duties.find((d) => d.id === id)?.name ?? ''
+const activeDuties = computed(() => (data.value?.duties ?? []).filter((d) => d.active))
+const groups = computed(() => (data.value?.ministries ?? []).map((m) => ({ m, duties: activeDuties.value.filter((d) => d.ministryId === m.id) })).filter((g) => g.duties.length))
 
-const FILTERS = [
-  { key: 'todas', label: 'Todas' },
-  { key: 'sem-acesso', label: 'Sem acesso' },
-  { key: 'sem-consentimento', label: 'Sem WhatsApp autorizado' },
-  { key: 'sem-funcao', label: 'Sem função' },
-  { key: 'inativas', label: 'Inativas' },
-]
-const filter = computed({
-  get: () => String(route.query.filtro ?? 'todas'),
-  set: (v) => router.replace({ query: { ...route.query, filtro: v === 'todas' ? undefined : v } }),
-})
+// ------------------------------------------------------------ pessoas
 const search = ref('')
-const dutyName = computed(() => new Map((data.value?.duties ?? []).map((d) => [d.id, d.name])))
+const filter = ref<'todas' | 'sem-acesso' | 'sem-whatsapp' | 'sem-funcao' | 'inativas'>('todas')
+const hasWa = (p: PersonAdmin) => Boolean(p.phone) && p.consent?.status === 'granted'
+const activePeople = computed(() => (data.value?.people ?? []).filter((p) => p.status === 'active'))
+type FilterKey = 'todas' | 'sem-acesso' | 'sem-whatsapp' | 'sem-funcao' | 'inativas'
+const filters = computed(() => {
+  const list: { key: FilterKey, label: string, n: number }[] = [
+    { key: 'todas' as const, label: 'Todas', n: activePeople.value.length },
+    { key: 'sem-acesso' as const, label: 'Sem acesso', n: activePeople.value.filter((p) => !p.hasAccount).length },
+    { key: 'sem-whatsapp' as const, label: 'Sem WhatsApp', n: activePeople.value.filter((p) => !hasWa(p)).length },
+    { key: 'sem-funcao' as const, label: 'Sem função', n: activePeople.value.filter((p) => !p.dutyIds.length).length },
+  ]
+  const inactive = (data.value?.people ?? []).filter((p) => p.status !== 'active').length
+  if (inactive) list.push({ key: 'inativas' as const, label: 'Inativas', n: inactive })
+  return list
+})
 const list = computed(() => {
-  const q = search.value.trim().toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '')
-  return (data.value?.people ?? []).filter((p) => {
-    if (q && !p.displayName.toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '').includes(q)) return false
-    switch (filter.value) {
-      case 'sem-acesso': return p.status === 'active' && !p.hasAccount
-      case 'sem-consentimento': return p.status === 'active' && p.consent?.status !== 'granted'
-      case 'sem-funcao': return p.status === 'active' && !p.dutyIds.length
-      case 'inativas': return p.status === 'inactive'
-      default: return p.status === 'active'
-    }
-  })
+  const q = search.value.trim().toLowerCase()
+  const base = filter.value === 'inativas' ? (data.value?.people ?? []).filter((p) => p.status !== 'active') : activePeople.value
+  return base.filter((p) => (!q || p.displayName.toLowerCase().includes(q))
+    && (filter.value !== 'sem-acesso' || !p.hasAccount)
+    && (filter.value !== 'sem-whatsapp' || !hasWa(p))
+    && (filter.value !== 'sem-funcao' || !p.dutyIds.length))
 })
-const counts = computed(() => {
-  const ps = data.value?.people ?? []
-  return {
-    'todas': ps.filter((p) => p.status === 'active').length,
-    'sem-acesso': ps.filter((p) => p.status === 'active' && !p.hasAccount).length,
-    'sem-consentimento': ps.filter((p) => p.status === 'active' && p.consent?.status !== 'granted').length,
-    'sem-funcao': ps.filter((p) => p.status === 'active' && !p.dutyIds.length).length,
-    'inativas': ps.filter((p) => p.status === 'inactive').length,
-  } as Record<string, number>
-})
+const roleTag = (p: PersonAdmin) => (p.roles.includes('coordinator') ? 'Coordenação' : p.roles.includes('pastor') ? 'Pastoral' : '')
+const dutiesLine = (p: PersonAdmin) => {
+  const names = p.dutyIds.map(dutyName).filter(Boolean)
+  return names.length ? names.slice(0, 3).join(' · ') + (names.length > 3 ? ` · +${names.length - 3}` : '') : 'Sem função marcada'
+}
+const accText = (p: PersonAdmin) => (p.hasAccount ? 'tem acesso' : p.invite?.state === 'pending' ? 'convite enviado' : p.invite?.state === 'expired' ? 'convite expirou' : 'sem convite')
+const waText = (p: PersonAdmin) => (!p.phone ? 'sem telefone' : hasWa(p) ? 'WhatsApp ok' : 'sem WhatsApp')
 
-function accessText(p: PersonAdmin) {
-  if (p.hasAccount) return { text: 'com acesso', tone: 'ok' }
-  if (p.invite?.state === 'pending') return { text: 'convite enviado', tone: 'info' }
-  if (p.invite?.state === 'expired') return { text: 'convite expirou', tone: 'wait' }
-  return { text: 'sem convite', tone: 'plain' }
+// Folha da pessoa
+const personId = ref<string | null>(null)
+const person = computed(() => data.value?.people.find((p) => p.id === personId.value) ?? null)
+const personOpen = computed({ get: () => Boolean(personId.value), set: (v) => { if (!v) personId.value = null } })
+const personDuties = ref<Set<string>>(new Set())
+const edit = reactive({ displayName: '', phone: '', coordinator: false, pastor: false, restExempt: false })
+function openPerson(id: string) {
+  personId.value = id
+  const p = data.value?.people.find((x) => x.id === id)
+  personDuties.value = new Set(p?.dutyIds ?? [])
+  Object.assign(edit, { displayName: p?.displayName ?? '', phone: p?.phone ?? '', coordinator: p?.roles.includes('coordinator') ?? false, pastor: p?.roles.includes('pastor') ?? false, restExempt: p?.restExempt ?? false })
+  lastInvite.value = null
 }
-function consentText(p: PersonAdmin) {
-  if (!p.phone) return { text: 'sem telefone', tone: 'wait' }
-  if (p.consent?.status === 'granted') return { text: 'autorizado', tone: 'ok' }
-  if (p.consent?.status === 'revoked') return { text: 'pediu para não receber', tone: 'plain' }
-  return { text: 'sem autorização', tone: 'wait' }
+function toggleDuty(id: string) {
+  const s = new Set(personDuties.value)
+  if (s.has(id)) s.delete(id)
+  else s.add(id)
+  personDuties.value = s
 }
-
-// ---------------------------------------------------------------- edição
-const editing = ref<PersonAdmin | null>(null)
-const isNew = ref(false)
-const form = reactive({ displayName: '', phone: '', roles: ['participant'] as string[], restExempt: false, notes: '', status: 'active', dutyIds: [] as string[] })
-const formError = ref('')
-function openNew() {
-  isNew.value = true
-  Object.assign(form, { displayName: '', phone: '', roles: ['participant'], restExempt: false, notes: '', status: 'active', dutyIds: [] })
-  formError.value = ''
-  editing.value = { id: '' } as PersonAdmin
-}
-function openEdit(p: PersonAdmin) {
-  isNew.value = false
-  Object.assign(form, { displayName: p.displayName, phone: p.phone ?? '', roles: [...p.roles], restExempt: p.restExempt, notes: p.notes ?? '', status: p.status, dutyIds: [...p.dutyIds] })
-  consentForm.source = 'presencial'
-  consentForm.evidenceNote = ''
-  formError.value = ''
-  editing.value = p
-}
-const sheetOpen = computed({ get: () => Boolean(editing.value), set: (v) => { if (!v) editing.value = null } })
-const saving = ref(false)
-async function save() {
-  formError.value = ''
-  saving.value = true
-  try {
-    if (isNew.value) {
-      await capi('/people', { method: 'POST', body: { displayName: form.displayName, phone: form.phone || null, roles: form.roles, restExempt: form.restExempt, notes: form.notes || null, dutyIds: form.dutyIds } })
-      toast.ok(`${form.displayName} cadastrado(a).`)
-    } else {
-      const id = editing.value!.id
-      await capi(`/people/${id}`, { method: 'PATCH', body: { displayName: form.displayName, phone: form.phone || null, roles: form.roles, restExempt: form.restExempt, notes: form.notes || null, status: form.status } })
-      await capi(`/people/${id}/qualifications`, { method: 'PUT', body: { dutyIds: form.dutyIds } })
-      toast.ok('Alterações salvas.')
-    }
-    editing.value = null
-    await refresh()
-  } catch (e) {
-    formError.value = apiErrorMessage(e)
-  } finally {
-    saving.value = false
-  }
-}
-
-const consentForm = reactive({ source: 'presencial', evidenceNote: '' })
-async function setConsent(status: 'granted' | 'revoked') {
-  const p = editing.value
+async function setConsent(on: boolean) {
+  const p = person.value
   if (!p) return
   try {
-    await capi(`/people/${p.id}/consent`, { method: 'PUT', body: { status, source: consentForm.source, evidenceNote: consentForm.evidenceNote || null } })
-    toast.ok(status === 'granted' ? 'Consentimento registrado.' : 'Revogação registrada: esta pessoa não recebe mais mensagens.')
+    await capi(`/people/${p.id}/consent`, { method: 'PUT', body: { status: on ? 'granted' : 'revoked', source: 'presencial' } })
+    toast.ok(on ? 'Autorização registrada.' : 'Autorização retirada: nenhuma mensagem sai para esta pessoa.')
     await refresh()
-    editing.value = data.value?.people.find((x) => x.id === p.id) ?? null
   } catch (e) {
     toast.error(e)
   }
 }
-
-const BLOCKED: Record<string, string> = {
-  no_consent: 'A mensagem ficou retida porque a pessoa ainda não autorizou o WhatsApp.',
-  no_phone: 'A mensagem ficou retida: falta o telefone.',
-  channel_disabled: 'O canal do WhatsApp está desativado.',
-}
-const lastInvite = ref<{ personId: string, messageId: string, status: string, blockedReason: string | null } | null>(null)
-async function invite(p: PersonAdmin) {
+const lastInvite = ref<{ messageId: string, status: string, blockedReason: string | null } | null>(null)
+async function invite() {
+  const p = person.value
+  if (!p) return
   try {
     const r = await capi<{ messageId: string, messageStatus: string, blockedReason: string | null }>(`/people/${p.id}/invite`, { method: 'POST' })
-    lastInvite.value = { personId: p.id, messageId: r.messageId, status: r.messageStatus, blockedReason: r.blockedReason }
-    if (r.messageStatus === 'blocked') toast.error(BLOCKED[r.blockedReason ?? ''] ?? 'A mensagem não pôde ser enviada.')
-    else toast.ok(p.hasAccount ? 'Link para nova senha enviado.' : `Convite enviado para ${p.displayName}.`)
+    lastInvite.value = { messageId: r.messageId, status: r.messageStatus, blockedReason: r.blockedReason }
+    if (r.messageStatus === 'blocked') toast.error(`Convite criado, mas a mensagem não saiu: ${r.blockedReason === 'no_consent' ? 'a pessoa ainda não autorizou o WhatsApp' : r.blockedReason === 'no_phone' ? 'sem telefone' : 'canal indisponível'}.`)
+    else toast.ok(`Convite enviado para ${p.displayName.split(' ')[0]} pelo WhatsApp.`)
     await refresh()
   } catch (e) {
     toast.error(e)
   }
 }
-const simBody = ref<string | null>(null)
-async function showSimulated(messageId: string) {
+const simulated = ref<string | null>(null)
+async function showSimulated() {
+  if (!lastInvite.value) return
   try {
-    await new Promise((r) => setTimeout(r, 400))
-    const r = await capi<{ body: string }>(`/messages/${messageId}/simulated`)
-    simBody.value = r.body
+    simulated.value = (await capi<{ body: string }>(`/messages/${lastInvite.value.messageId}/simulated`)).body
   } catch {
-    toast.error('A mensagem ainda está na fila do trabalhador (pnpm worker). Tente em alguns segundos.')
+    toast.error('A mensagem ainda está na fila. Tente de novo em alguns segundos.')
   }
 }
-const simOpen = computed({ get: () => simBody.value !== null, set: (v) => { if (!v) simBody.value = null } })
-
-const dutiesByMinistry = computed(() => (data.value?.ministries ?? []).map((m) => ({
-  ministry: m,
-  duties: (data.value?.duties ?? []).filter((d) => d.ministryId === m.id && d.active),
-})).filter((g) => g.duties.length))
-function toggleDuty(id: string) {
-  form.dutyIds = form.dutyIds.includes(id) ? form.dutyIds.filter((x) => x !== id) : [...form.dutyIds, id]
+async function savePerson() {
+  const p = person.value
+  if (!p) return
+  try {
+    const roles = ['participant', ...(edit.coordinator ? ['coordinator'] : []), ...(edit.pastor ? ['pastor'] : [])]
+    const changes: Record<string, unknown> = {}
+    if (edit.displayName.trim() !== p.displayName) changes.displayName = edit.displayName.trim()
+    if ((edit.phone.trim() || null) !== (p.phone ?? null)) changes.phone = edit.phone.trim() || null
+    if (roles.sort().join() !== [...p.roles].sort().join()) changes.roles = roles
+    if (edit.restExempt !== p.restExempt) changes.restExempt = edit.restExempt
+    if (Object.keys(changes).length) await capi(`/people/${p.id}`, { method: 'PATCH', body: changes })
+    await capi(`/people/${p.id}/qualifications`, { method: 'PUT', body: { dutyIds: [...personDuties.value] } })
+    toast.ok('Alterações salvas.')
+    personId.value = null
+    await refresh()
+  } catch (e) {
+    toast.error(e)
+  }
 }
-function toggleRole(r: string) {
-  form.roles = form.roles.includes(r) ? form.roles.filter((x) => x !== r) : [...form.roles, r]
+async function setActive(active: boolean) {
+  const p = person.value
+  if (!p) return
+  try {
+    await capi(`/people/${p.id}`, { method: 'PATCH', body: { status: active ? 'active' : 'inactive' } })
+    toast.ok(active ? 'Pessoa reativada.' : 'Pessoa inativada. O histórico das escalas continua guardado.')
+    personId.value = null
+    await refresh()
+  } catch (e) {
+    toast.error(e)
+  }
+}
+
+// Nova pessoa
+const newOpen = ref(false)
+const np = reactive({ name: '', phone: '' })
+async function saveNew() {
+  if (np.name.trim().length < 2) {
+    toast.error('Escreva o nome.')
+    return
+  }
+  try {
+    const r = await capi<{ person: { id: string } }>('/people', { method: 'POST', body: { displayName: np.name.trim(), phone: np.phone.trim() || null } })
+    toast.ok(`${np.name.trim().split(' ')[0]} entrou na lista. Agora marque as funções.`)
+    newOpen.value = false
+    Object.assign(np, { name: '', phone: '' })
+    await refresh()
+    openPerson(r.person.id)
+  } catch (e) {
+    toast.error(e)
+  }
+}
+
+// ------------------------------------------------------------ funções
+const dutyId = ref<string | null>(null)
+const duty = computed(() => data.value?.duties.find((d) => d.id === dutyId.value) ?? null)
+const dutyOpen = computed({ get: () => Boolean(dutyId.value), set: (v) => { if (!v) dutyId.value = null } })
+const dform = reactive({ name: '', instructions: '', required: 1, arrival: '' as string | number, musicNotice: false })
+function openDuty(id: string) {
+  dutyId.value = id
+  const d = data.value?.duties.find((x) => x.id === id)
+  Object.assign(dform, { name: d?.name ?? '', instructions: d?.instructions ?? '', required: d?.defaultRequiredCount ?? 1, arrival: d?.arrivalMinutesBefore ?? '', musicNotice: d?.receivesMusicNotice ?? false })
+}
+const qualified = computed(() => (data.value?.people ?? []).filter((p) => p.status === 'active' && dutyId.value && p.dutyIds.includes(dutyId.value)))
+const ministryName = (id: string) => data.value?.ministries.find((m) => m.id === id)?.name ?? ''
+const dutySub = (d: Duty) => {
+  const n = activePeople.value.filter((p) => p.dutyIds.includes(d.id)).length
+  return `${plural(d.defaultRequiredCount, 'pessoa', 'pessoas')} · ${d.arrivalMinutesBefore ? `chega ${d.arrivalMinutesBefore} min antes` : 'horário a combinar'} · ${plural(n, 'habilitado', 'habilitados')}`
+}
+async function saveDuty() {
+  const d = duty.value
+  if (!d) return
+  try {
+    const arrival = dform.arrival === '' ? null : Number(dform.arrival)
+    await capi(`/duties/${d.id}`, { method: 'PATCH', body: { name: dform.name.trim(), instructions: dform.instructions.trim() || null, defaultRequiredCount: Math.max(1, Number(dform.required) || 1), arrivalMinutesBefore: arrival, receivesMusicNotice: dform.musicNotice } })
+    toast.ok('Função salva. Vale para os próximos cultos criados.')
+    dutyId.value = null
+    await refresh()
+  } catch (e) {
+    toast.error(e)
+  }
+}
+async function removeDuty() {
+  const d = duty.value
+  if (!d || !window.confirm(`Tirar a função ${d.name}? Se ela já foi usada em escalas, fica desativada para preservar o histórico.`)) return
+  try {
+    const r = await capi<{ deleted: boolean }>(`/duties/${d.id}`, { method: 'DELETE' })
+    toast.ok(r.deleted ? 'Função apagada.' : 'Função desativada. O histórico continua guardado.')
+    dutyId.value = null
+    await refresh()
+  } catch (e) {
+    toast.error(e)
+  }
+}
+const newDutyOpen = ref(false)
+const nd = reactive({ ministryId: '', ministryName: '', name: '' })
+function openNewDuty() {
+  Object.assign(nd, { ministryId: data.value?.ministries[0]?.id ?? '', ministryName: '', name: '' })
+  newDutyOpen.value = true
+}
+async function saveNewDuty() {
+  try {
+    let ministryId = nd.ministryId
+    if (ministryId === 'new' || !ministryId) {
+      if (nd.ministryName.trim().length < 2) {
+        toast.error('Dê um nome ao novo grupo.')
+        return
+      }
+      ministryId = (await capi<{ ministry: { id: string } }>('/ministries', { method: 'POST', body: { name: nd.ministryName.trim() } })).ministry.id
+    }
+    await capi('/duties', { method: 'POST', body: { ministryId, name: nd.name.trim() } })
+    toast.ok(`Função ${nd.name.trim()} criada.`)
+    newDutyOpen.value = false
+    await refresh()
+  } catch (e) {
+    toast.error(e)
+  }
 }
 </script>
 
 <template>
-  <div class="page page--wide">
-    <div class="page-head">
-      <p class="kicker">
-        Cadastro
-      </p>
-      <div class="row row--between">
-        <h1>Pessoas</h1>
+  <section
+    v-if="data"
+    class="stack-md"
+  >
+    <div
+      class="row row--between"
+      style="align-items:flex-end;gap:12px"
+    >
+      <div>
+        <BackLink
+          :to="link('/coordenacao')"
+          label="Mesa"
+        />
+        <h1
+          class="h1--sm"
+          style="margin-top:6px"
+        >
+          Pessoas e funções
+        </h1>
+      </div>
+      <div
+        class="seg seg--white seg--dark"
+        role="tablist"
+      >
         <button
           type="button"
-          class="btn btn--primary"
-          @click="openNew"
+          role="tab"
+          :aria-selected="tab === 'pessoas'"
+          :aria-pressed="tab === 'pessoas'"
+          @click="setTab('pessoas')"
         >
-          <Icon name="plus" /> Nova pessoa
+          Pessoas
+        </button>
+        <button
+          type="button"
+          role="tab"
+          :aria-selected="tab === 'funcoes'"
+          :aria-pressed="tab === 'funcoes'"
+          @click="setTab('funcoes')"
+        >
+          Funções
         </button>
       </div>
-      <p class="lede">
-        Telefones e consentimento ficam só com a coordenação. Cada pessoa recebe um convite individual para criar a própria senha.
-      </p>
     </div>
 
-    <div
-      class="row"
-      style="margin-bottom:1rem"
-    >
-      <label
-        class="sr-only"
-        for="people-search"
-      >Buscar pessoa</label>
-      <input
-        id="people-search"
-        v-model="search"
-        class="input"
-        style="max-width:18rem"
-        placeholder="Buscar pelo nome"
-        type="search"
-      >
+    <template v-if="tab === 'pessoas'">
+      <div class="row">
+        <input
+          v-model="search"
+          type="search"
+          class="input"
+          style="flex:1 1 200px;width:auto;min-height:46px;border-radius:14px;font-size:15px"
+          placeholder="Buscar pelo nome"
+          aria-label="Buscar pelo nome"
+        >
+        <button
+          type="button"
+          class="btn btn--md"
+          style="min-height:46px"
+          @click="newOpen = true"
+        >
+          <Icon
+            name="plus"
+            :weight="2.2"
+            style="width:18px;height:18px"
+          />Nova pessoa
+        </button>
+      </div>
       <div
-        class="row"
+        class="chips"
         role="group"
         aria-label="Filtro"
-        style="gap:.25rem"
       >
         <button
-          v-for="f in FILTERS"
+          v-for="f in filters"
           :key="f.key"
           type="button"
-          class="btn btn--small"
-          :class="{ 'btn--primary': filter === f.key }"
+          class="chip chip--dark"
           :aria-pressed="filter === f.key"
           @click="filter = f.key"
         >
-          {{ f.label }} <span
-            class="muted"
-            :style="filter === f.key ? 'color:inherit;opacity:.8' : ''"
-          >{{ counts[f.key] }}</span>
+          {{ f.label }} <span style="opacity:.7">{{ f.n }}</span>
         </button>
       </div>
-    </div>
-
-    <EmptyState
-      v-if="!list.length"
-      :title="search ? 'Ninguém com esse nome' : 'Ninguém nesta lista'"
-      :text="filter === 'todas' ? 'Cadastre as pessoas que servem na igreja.' : undefined"
-    />
-    <div
-      v-else
-      class="table-wrap"
-    >
-      <table class="table">
-        <thead>
-          <tr>
-            <th scope="col">
-              Nome
-            </th>
-            <th scope="col">
-              Funções
-            </th>
-            <th scope="col">
-              Acesso
-            </th>
-            <th scope="col">
-              WhatsApp
-            </th>
-            <th scope="col">
-              <span class="sr-only">Ações</span>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr
-            v-for="p in list"
-            :key="p.id"
-          >
-            <th
-              scope="row"
-              style="font-weight:700"
-            >
-              <button
-                type="button"
-                class="btn btn--quiet"
-                style="padding:0;min-height:0;color:var(--ink);text-decoration:none;font-weight:700"
-                @click="openEdit(p)"
-              >
-                {{ p.displayName }}
-              </button>
-              <span
-                class="small muted"
-                style="display:block;font-weight:400"
-              >
-                {{ p.roles.filter((r) => r !== 'participant').map((r) => ROLE_LABEL[r]).join(' · ') }}{{ p.restExempt ? ' · fora da meta de folga' : '' }}
-              </span>
-            </th>
-            <td class="small">
-              {{ p.dutyIds.map((id) => dutyName.get(id)).filter(Boolean).join(', ') || '—' }}
-            </td>
-            <td>
-              <span
-                class="tag"
-                :class="`tag--${accessText(p).tone}`"
-              >{{ accessText(p).text }}</span>
-            </td>
-            <td>
-              <span
-                class="tag"
-                :class="`tag--${consentText(p).tone}`"
-              >{{ consentText(p).text }}</span>
-            </td>
-            <td
-              class="nowrap"
-              style="text-align:right"
-            >
-              <button
-                v-if="p.status === 'active' && p.phone && !p.hasAccount"
-                type="button"
-                class="btn btn--small"
-                @click="invite(p)"
-              >
-                {{ p.invite ? 'Reenviar convite' : 'Convidar' }}
-              </button>
-              <button
-                v-else-if="p.status === 'active' && p.hasAccount"
-                type="button"
-                class="btn btn--quiet btn--small"
-                @click="invite(p)"
-              >
-                Reenviar acesso
-              </button>
-              <button
-                v-if="lastInvite?.personId === p.id && info?.whatsappMode === 'simulation' && lastInvite.status !== 'blocked'"
-                type="button"
-                class="btn btn--quiet btn--small"
-                @click="showSimulated(lastInvite!.messageId)"
-              >
-                Ver mensagem simulada
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <Sheet
-      v-model:open="sheetOpen"
-      :title="isNew ? 'Nova pessoa' : form.displayName"
-      wide
-    >
-      <form
-        id="person-form"
-        @submit.prevent="save"
-      >
-        <div class="fields-2">
-          <div class="field">
-            <label
-              class="field__label"
-              for="p-name"
-            >Nome</label>
-            <input
-              id="p-name"
-              v-model="form.displayName"
-              class="input"
-              required
-              autocomplete="off"
-            >
-          </div>
-          <div class="field">
-            <label
-              class="field__label"
-              for="p-phone"
-            >Celular (WhatsApp)</label>
-            <input
-              id="p-phone"
-              v-model="form.phone"
-              class="input"
-              inputmode="tel"
-              autocomplete="off"
-              placeholder="(51) 99999-9999"
-              aria-describedby="p-phone-hint"
-            >
+      <div class="card card--flush list">
+        <button
+          v-for="p in list"
+          :key="p.id"
+          type="button"
+          class="listrow"
+          @click="openPerson(p.id)"
+        >
+          <span class="av av--lg">{{ initials(p.displayName) }}</span>
+          <span class="grow">
             <span
-              id="p-phone-hint"
-              class="field__hint"
-            >Trocar o número desfaz o consentimento e convites pendentes.</span>
-          </div>
-        </div>
-
-        <fieldset style="margin-top:1.25rem">
-          <legend>Papel na igreja</legend>
-          <div class="row">
-            <label
-              v-for="r in ['coordinator', 'pastor', 'participant']"
-              :key="r"
-              class="check"
-            >
-              <input
-                type="checkbox"
-                :checked="form.roles.includes(r)"
-                @change="toggleRole(r)"
-              >
-              <span class="check__text">{{ ROLE_LABEL[r] }}</span>
-            </label>
-          </div>
-          <label class="check">
-            <input
-              v-model="form.restExempt"
-              type="checkbox"
-            >
-            <span class="check__text">Fora da meta de domingo livre <span
-              class="muted small"
-              style="display:block"
-            >Pastores já ficam fora automaticamente.</span></span>
-          </label>
-        </fieldset>
-
-        <fieldset style="margin-top:1.25rem">
-          <legend>Pode servir em</legend>
-          <div
-            v-for="g in dutiesByMinistry"
-            :key="g.ministry.id"
-            style="margin-top:.5rem"
-          >
-            <p class="kicker">
-              {{ g.ministry.name }}
-            </p>
-            <div
               class="row"
-              style="gap:0 1.25rem"
-            >
-              <label
-                v-for="d in g.duties"
-                :key="d.id"
-                class="check"
-              >
-                <input
-                  type="checkbox"
-                  :checked="form.dutyIds.includes(d.id)"
-                  @change="toggleDuty(d.id)"
-                >
-                <span class="check__text">{{ d.name }}</span>
-              </label>
-            </div>
-          </div>
-        </fieldset>
-
-        <div
-          class="field"
-          style="margin-top:1.25rem"
-        >
-          <label
-            class="field__label"
-            for="p-notes"
-          >Observações da coordenação</label>
-          <textarea
-            id="p-notes"
-            v-model="form.notes"
-            class="textarea"
-            style="min-height:4rem"
-          />
-        </div>
-        <label
-          v-if="!isNew"
-          class="check"
-          style="margin-top:.5rem"
-        >
-          <input
-            type="checkbox"
-            :checked="form.status === 'inactive'"
-            @change="form.status = form.status === 'active' ? 'inactive' : 'active'"
+              style="gap:8px"
+            ><span style="font-weight:800;font-size:16px">{{ p.displayName }}</span><span
+              v-if="roleTag(p)"
+              class="tag"
+            >{{ roleTag(p) }}</span><span
+              v-if="p.status !== 'active'"
+              class="tag tag--no"
+            >inativa</span></span>
+            <span
+              class="soft"
+              style="display:block;font-size:13.5px;margin-top:1px"
+            >{{ dutiesLine(p) }}</span>
+          </span>
+          <span
+            style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:12.5px;font-weight:700;white-space:nowrap"
           >
-          <span class="check__text">Pessoa inativa <span
-            class="muted small"
-            style="display:block"
-          >Não aparece para escalar nem recebe mensagens. O histórico é mantido.</span></span>
-        </label>
+            <span :style="{ color: p.hasAccount ? 'var(--ok)' : 'var(--muted)' }">{{ accText(p) }}</span>
+            <span :style="{ color: hasWa(p) ? 'var(--ok)' : 'var(--wait)' }">{{ waText(p) }}</span>
+          </span>
+          <Icon
+            name="chevron-right"
+            :weight="2"
+            class="listrow__chev"
+          />
+        </button>
         <p
-          v-if="formError"
-          class="field__error"
-          role="alert"
+          v-if="!list.length"
+          class="soft"
+          style="padding:16px"
         >
-          {{ formError }}
+          Ninguém com esse filtro.
         </p>
-      </form>
+      </div>
+    </template>
 
-      <section
-        v-if="!isNew && editing"
-        class="section"
-        style="margin-top:2rem"
+    <template v-else>
+      <div
+        v-for="g in groups"
+        :key="g.m.id"
+        class="card card--flush"
       >
-        <div class="section-head">
-          <h2 style="font-size:1.2rem">
-            Consentimento para WhatsApp
-          </h2>
-        </div>
-        <p style="margin-top:.6rem">
-          <template v-if="editing.consent?.status === 'granted'">
-            Autorizado ({{ editing.consent.source }}) em {{ dateTime(editing.consent.updatedAt, tz) }}.
-          </template>
-          <template v-else-if="editing.consent?.status === 'revoked'">
-            Revogado em {{ dateTime(editing.consent.updatedAt, tz) }}.
-          </template>
-          <template v-else>
-            Ainda não registrado. Sem consentimento, nenhuma mensagem é enviada.
-          </template>
-        </p>
         <p
-          v-if="editing.consent?.evidenceNote"
-          class="small muted"
+          class="caps"
+          style="padding:12px 16px 8px"
         >
-          {{ editing.consent.evidenceNote }}
+          {{ g.m.name }}
         </p>
-        <div
-          class="fields-2"
-          style="margin-top:.75rem"
+        <button
+          v-for="d in g.duties"
+          :key="d.id"
+          type="button"
+          class="listrow"
+          style="border-top:1px solid var(--line-2)"
+          @click="openDuty(d.id)"
         >
-          <label class="field"><span class="field__label">Como a pessoa autorizou</span>
-            <select
-              v-model="consentForm.source"
-              class="select"
-            >
-              <option value="presencial">Pessoalmente</option>
-              <option value="formulario">Formulário</option>
-              <option value="whatsapp">Mensagem no WhatsApp</option>
-              <option value="outro">Outro</option>
-            </select>
-          </label>
-          <label class="field"><span class="field__label">Registro (opcional)</span><input
-            v-model="consentForm.evidenceNote"
-            class="input"
-            placeholder="Ex.: confirmou após o culto de 20/09"
-          ></label>
-        </div>
+          <span class="grow"><span
+            class="strong"
+            style="display:block"
+          >{{ d.name }}</span><span
+            class="soft"
+            style="display:block;font-size:13.5px"
+          >{{ dutySub(d) }}</span></span>
+          <Icon
+            name="chevron-right"
+            :weight="2"
+            class="listrow__chev"
+          />
+        </button>
+      </div>
+      <button
+        type="button"
+        class="btn btn--dashed"
+        @click="openNewDuty"
+      >
+        <Icon
+          name="plus"
+          :weight="2"
+        />Nova função
+      </button>
+    </template>
+
+    <!-- Pessoa -->
+    <Sheet v-model:open="personOpen">
+      <template
+        v-if="person"
+        #head
+      >
         <div
           class="row"
-          style="margin-top:.75rem"
+          style="flex-wrap:nowrap;gap:14px"
         >
-          <button
-            type="button"
-            class="btn btn--small"
-            :disabled="!editing.phone"
-            @click="setConsent('granted')"
-          >
-            Registrar autorização
-          </button>
-          <button
-            v-if="editing.consent?.status === 'granted'"
-            type="button"
-            class="btn btn--small btn--no"
-            @click="setConsent('revoked')"
-          >
-            Registrar revogação
-          </button>
+          <span class="av av--xl">{{ initials(person.displayName) }}</span>
+          <div>
+            <h2 class="sheet__title">
+              {{ person.displayName }}
+            </h2>
+            <p class="soft small">
+              {{ roleTag(person) || 'Voluntário(a)' }} · {{ person.phone ?? 'Sem telefone' }}
+            </p>
+          </div>
         </div>
-      </section>
-
-      <template #foot>
+      </template>
+      <template v-if="person">
+        <div
+          class="stack-sm"
+          style="margin-top:16px"
+        >
+          <SwitchRow
+            :model-value="person.consent?.status === 'granted'"
+            title="Autorizou receber WhatsApp"
+            sub="Registre quando a pessoa disser sim (pessoalmente ou por mensagem)."
+            boxed
+            :disabled="!person.phone"
+            @update:model-value="setConsent"
+          />
+          <div
+            v-if="person.hasAccount"
+            class="panel panel--ok row"
+            style="flex-wrap:nowrap;gap:10px;padding:12px 14px;border-radius:14px;color:var(--ok-ink);font-weight:700;font-size:14.5px"
+          >
+            <Icon
+              name="check"
+              :weight="2.2"
+              style="width:18px;height:18px"
+            />Já criou a senha e usa o app.
+          </div>
+          <div
+            v-else
+            class="row"
+            style="padding:12px 14px;border-radius:14px;border:1.5px solid var(--control)"
+          >
+            <span
+              class="grow"
+              style="min-width:160px"
+            ><span
+              class="strong"
+              style="display:block"
+            >Ainda sem acesso ao app</span><span
+              class="muted"
+              style="display:block;font-size:13.5px"
+            >{{ person.invite?.state === 'pending' ? 'Convite enviado. Vale por 72 horas.' : 'A pessoa cria a própria senha pelo link.' }}</span></span>
+            <button
+              type="button"
+              class="btn btn--soft btn--sm"
+              :disabled="!person.phone"
+              @click="invite"
+            >
+              {{ person.invite?.state === 'pending' ? 'Reenviar convite' : 'Enviar convite pelo WhatsApp' }}
+            </button>
+          </div>
+          <p
+            v-if="lastInvite && info?.whatsappMode === 'simulation' && lastInvite.status !== 'blocked'"
+            class="small"
+          >
+            <span class="tag tag--wait">simulação</span> A mensagem não sai do servidor.
+            <button
+              type="button"
+              class="link"
+              @click="showSimulated"
+            >
+              Ver mensagem simulada
+            </button>
+          </p>
+          <p
+            v-if="simulated"
+            class="bubble"
+            style="word-break:break-all"
+          >
+            {{ simulated }}
+          </p>
+        </div>
+        <p
+          class="strong"
+          style="margin:18px 0 8px"
+        >
+          O que esta pessoa pode fazer
+        </p>
+        <div class="stack-sm">
+          <div
+            v-for="g in groups"
+            :key="g.m.id"
+          >
+            <p
+              class="caps"
+              style="font-size:12px;margin-bottom:6px"
+            >
+              {{ g.m.name }}
+            </p>
+            <div class="chips">
+              <button
+                v-for="d in g.duties"
+                :key="d.id"
+                type="button"
+                class="chip"
+                :aria-pressed="personDuties.has(d.id)"
+                @click="toggleDuty(d.id)"
+              >
+                <Icon
+                  v-if="personDuties.has(d.id)"
+                  name="check"
+                  :weight="2.4"
+                />{{ d.name }}
+              </button>
+            </div>
+          </div>
+        </div>
+        <details style="margin-top:18px">
+          <summary
+            class="strong"
+            style="cursor:pointer"
+          >
+            Dados e papel ›
+          </summary>
+          <div
+            class="stack-md"
+            style="margin-top:12px"
+          >
+            <label class="field"><span class="field__label">Nome</span><input
+              v-model="edit.displayName"
+              class="input"
+            ></label>
+            <label class="field"><span class="field__label">Celular (WhatsApp)</span><input
+              v-model="edit.phone"
+              class="input"
+              type="tel"
+              placeholder="(51) 99999-9999"
+            ><span class="field__hint">Trocar o número retira a autorização do WhatsApp e cancela convites pendentes.</span></label>
+            <div class="chips">
+              <button
+                type="button"
+                class="chip chip--lg"
+                :aria-pressed="edit.coordinator"
+                @click="edit.coordinator = !edit.coordinator"
+              >
+                Coordenação
+              </button>
+              <button
+                type="button"
+                class="chip chip--lg"
+                :aria-pressed="edit.pastor"
+                @click="edit.pastor = !edit.pastor"
+              >
+                Pastoral
+              </button>
+            </div>
+            <SwitchRow
+              v-model="edit.restExempt"
+              title="Fora do alerta de folga"
+              sub="Para quem serve todo domingo por vocação (ex.: pastores)."
+              boxed
+            />
+            <button
+              type="button"
+              class="link link--muted"
+              style="align-self:flex-start"
+              @click="setActive(person.status !== 'active')"
+            >
+              {{ person.status === 'active' ? 'Inativar esta pessoa' : 'Reativar esta pessoa' }}
+            </button>
+          </div>
+        </details>
         <button
           type="button"
-          class="btn"
-          @click="editing = null"
+          class="btn btn--block"
+          style="margin-top:18px;min-height:50px"
+          @click="savePerson"
         >
-          Cancelar
-        </button>
-        <button
-          type="submit"
-          form="person-form"
-          class="btn btn--primary"
-          :disabled="saving"
-        >
-          {{ isNew ? 'Cadastrar' : 'Salvar' }}
+          Salvar
         </button>
       </template>
     </Sheet>
 
     <Sheet
-      v-model:open="simOpen"
-      title="Mensagem simulada"
+      v-model:open="newOpen"
+      title="Nova pessoa"
+      lede="Nome e celular bastam. Depois você marca as funções e envia o convite."
     >
-      <p class="tag tag--sim">
-        Simulação — esta mensagem não foi enviada
-      </p>
-      <p style="margin-top:1rem;white-space:pre-line;word-break:break-word">
-        {{ simBody }}
-      </p>
-      <p
-        class="muted small"
-        style="margin-top:1rem"
+      <form
+        class="stack-md"
+        @submit.prevent="saveNew"
       >
-        No modo de simulação o link aparece aqui para testes locais. Com o canal oficial, o link só vai para o WhatsApp da pessoa.
-      </p>
+        <label class="field"><span class="field__label">Nome</span><input
+          v-model="np.name"
+          class="input"
+          autocomplete="off"
+        ></label>
+        <label class="field"><span class="field__label">Celular (WhatsApp)</span><input
+          v-model="np.phone"
+          class="input"
+          type="tel"
+          placeholder="(51) 99999-9999"
+        ></label>
+        <button class="btn btn--block">
+          Cadastrar
+        </button>
+      </form>
     </Sheet>
-  </div>
+
+    <!-- Função -->
+    <Sheet v-model:open="dutyOpen">
+      <template
+        v-if="duty"
+        #head
+      >
+        <p class="caps">
+          {{ ministryName(duty.ministryId) }}
+        </p>
+        <h2
+          class="sheet__title"
+          style="margin-top:2px"
+        >
+          {{ duty.name }}
+        </h2>
+      </template>
+      <form
+        v-if="duty"
+        class="stack-md"
+        style="margin-top:14px"
+        @submit.prevent="saveDuty"
+      >
+        <label class="field"><span class="field__label">Nome</span><input
+          v-model="dform.name"
+          class="input"
+        ></label>
+        <label class="field"><span class="field__label">O que a pessoa faz (aparece para quem for escalado)</span><textarea
+          v-model="dform.instructions"
+          class="textarea"
+          style="min-height:80px;font-size:15.5px"
+        /></label>
+        <div class="row">
+          <label
+            class="field grow"
+            style="min-width:140px"
+          ><span class="field__label">Pessoas por culto</span><input
+            v-model="dform.required"
+            type="number"
+            min="1"
+            max="50"
+            class="input"
+          ></label>
+          <label
+            class="field grow"
+            style="min-width:140px"
+          ><span class="field__label">Chega quantos min antes</span><input
+            v-model="dform.arrival"
+            type="number"
+            min="0"
+            max="600"
+            class="input"
+            placeholder="a combinar"
+          ></label>
+        </div>
+        <SwitchRow
+          v-model="dform.musicNotice"
+          title="Recebe o aviso das músicas"
+          sub="Quem está escalado nesta função recebe as músicas do culto."
+          boxed
+        />
+        <div>
+          <p
+            class="strong"
+            style="margin-bottom:8px"
+          >
+            Quem pode fazer
+          </p>
+          <div class="chips">
+            <span
+              v-for="p in qualified"
+              :key="p.id"
+              class="person-tag"
+            ><span class="av av--sm">{{ initials(p.displayName) }}</span>{{ p.displayName }}</span>
+            <span
+              v-if="!qualified.length"
+              class="soft small"
+            >Ninguém ainda. Marque na aba Pessoas.</span>
+          </div>
+        </div>
+        <button class="btn btn--block">
+          Salvar
+        </button>
+        <button
+          type="button"
+          class="link link--muted"
+          @click="removeDuty"
+        >
+          Tirar esta função
+        </button>
+      </form>
+    </Sheet>
+
+    <Sheet
+      v-model:open="newDutyOpen"
+      title="Nova função"
+      lede="Depois você ajusta as instruções, a quantidade e quem pode fazer."
+    >
+      <form
+        class="stack-md"
+        @submit.prevent="saveNewDuty"
+      >
+        <label class="field"><span class="field__label">Grupo</span><select
+          v-model="nd.ministryId"
+          class="select"
+        >
+          <option
+            v-for="m in data.ministries"
+            :key="m.id"
+            :value="m.id"
+          >{{ m.name }}</option>
+          <option value="new">Novo grupo…</option>
+        </select></label>
+        <label
+          v-if="nd.ministryId === 'new' || !data.ministries.length"
+          class="field"
+        ><span class="field__label">Nome do novo grupo</span><input
+          v-model="nd.ministryName"
+          class="input"
+          placeholder="Ex.: Recepção"
+        ></label>
+        <label class="field"><span class="field__label">Nome da função</span><input
+          v-model="nd.name"
+          class="input"
+          placeholder="Ex.: Boas-vindas"
+        ></label>
+        <button class="btn btn--block">
+          Criar função
+        </button>
+      </form>
+    </Sheet>
+  </section>
 </template>

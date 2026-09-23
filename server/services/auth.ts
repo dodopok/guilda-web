@@ -1,7 +1,7 @@
 import { and, eq, gt, isNull, ne, sql } from 'drizzle-orm'
 import { getConfig } from '../config'
 import type { Db, DbOrTx } from '../db/client'
-import { accounts, authTokens, churches, consents, people, sessions } from '../db/schema'
+import { accounts, authTokens, churchLogos, churches, consents, people, sessions } from '../db/schema'
 import { burnPasswordCheck, hashPassword, randomToken, sha256, verifyPassword } from '../lib/crypto'
 import { AppError, badRequest, notFound, unauthorized } from '../lib/errors'
 import { normalizePhone } from '../lib/phone'
@@ -192,6 +192,12 @@ async function findValidToken(db: DbOrTx, token: string, purpose: 'invite' | 'pa
 
 // Informações mínimas para a tela do convite: só o nome da igreja e o primeiro nome
 // do próprio destinatário.
+// Igreja do convite (para o logo na tela de criação de senha).
+export async function inviteChurchId(db: Db, token: string): Promise<string> {
+  const row = await findValidToken(db, token, 'invite')
+  return row.churchId!
+}
+
 export async function describeInvite(db: Db, token: string) {
   const row = await findValidToken(db, token, 'invite')
   const person = await db.query.people.findFirst({ where: and(eq(people.churchId, row.churchId!), eq(people.id, row.personId!)) })
@@ -201,6 +207,8 @@ export async function describeInvite(db: Db, token: string) {
   return {
     churchName: church.name,
     timezone: church.timezone,
+    accentColor: church.accentColor,
+    hasLogo: Boolean(await db.query.churchLogos.findFirst({ where: eq(churchLogos.churchId, church.id), columns: { churchId: true } })),
     firstName: firstName(person.displayName),
     expiresAt: row.expiresAt,
     accountExists: Boolean(existing),

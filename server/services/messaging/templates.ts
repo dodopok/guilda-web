@@ -12,6 +12,7 @@ export type MessageKind
     | 'schedule_change'
     | 'swap_invite'
     | 'music_notice'
+    | 'reading_notice'
     | 'coordination_alert'
 
 export interface TemplateDefinition {
@@ -89,6 +90,13 @@ export const TEMPLATES: Record<MessageKind, TemplateDefinition> = {
     label: 'Músicas do culto',
     body: 'Olá, {{1}}! As músicas do culto de {{2}} em {{3}} foram definidas: {{4}}. Veja no app: {{5}}',
     params: ['primeiro nome', 'culto', 'igreja', 'músicas', 'link'],
+  },
+  reading_notice: {
+    kind: 'reading_notice',
+    defaultName: 'guilda_leitura',
+    label: 'Aviso de leitura',
+    body: 'Olá, {{1}}! Você lê {{2}} no culto de {{3}} em {{4}}: {{5}}. Veja o roteiro no app: {{6}}',
+    params: ['primeiro nome', 'leitura', 'culto', 'igreja', 'referência', 'link'],
   },
   coordination_alert: {
     kind: 'coordination_alert',

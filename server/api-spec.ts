@@ -13,6 +13,8 @@ import { submitSchema } from './services/availability'
 import { applySchema, blocksSchema, musicSchema, scriptUpdateSchema, songSchema, templateSchema } from './services/liturgy'
 import { channelUpdateSchema, coexistenceSchema } from './services/messaging/admin'
 import { importInputSchema } from './services/import'
+import { logoSchema } from './services/brand'
+import { setupDutiesSchema } from './services/setup'
 
 export interface RouteDoc {
   method: 'get' | 'post' | 'put' | 'patch' | 'delete'
@@ -37,11 +39,18 @@ export const ROUTES: RouteDoc[] = [
   { method: 'post', path: '/api/v1/password-reset/request', summary: 'Pedir link de nova senha pelo WhatsApp (resposta sempre igual)', auth: 'none', body: z.object({ login: z.string() }) },
   { method: 'post', path: '/api/v1/password-reset/confirm', summary: 'Definir nova senha com o link recebido', auth: 'none', body: z.object({ token: z.string(), password: z.string() }) },
   { method: 'get', path: '/api/v1/invites/{token}', summary: 'Dados mínimos do convite (igreja e primeiro nome)', auth: 'none' },
+  { method: 'get', path: '/api/v1/invites/{token}/logo', summary: 'Logo da igreja do convite', auth: 'none' },
   { method: 'post', path: '/api/v1/invites/{token}/accept', summary: 'Aceitar convite: cria a conta (ou vincula com a senha existente) e inicia sessão', auth: 'none', body: z.object({ password: z.string(), client: z.enum(['web', 'native']).optional() }) },
   // Igrejas
   { method: 'post', path: '/api/v1/churches', summary: 'Cadastrar igreja e primeira pessoa da coordenação (devolve o link do primeiro convite uma única vez)', auth: 'platform_admin', body: createChurchSchema },
   { method: 'get', path: C, summary: 'Igreja, papéis da pessoa, cor litúrgica corrente', auth: 'session' },
-  { method: 'patch', path: C, summary: 'Configurações da igreja e do lembrete semanal', auth: 'coordinator', body: updateChurchSchema },
+  { method: 'patch', path: C, summary: 'Configurações da igreja, cor e lembrete semanal', auth: 'coordinator', body: updateChurchSchema },
+  { method: 'get', path: `${C}/logo`, summary: 'Logo da igreja (PNG, JPEG ou WebP)', auth: 'session' },
+  { method: 'put', path: `${C}/logo`, summary: 'Enviar logo (data URL, até 300 KB; tipo conferido pelos bytes)', auth: 'coordinator', body: logoSchema },
+  { method: 'delete', path: `${C}/logo`, summary: 'Tirar o logo', auth: 'coordinator' },
+  { method: 'get', path: `${C}/setup`, summary: 'Configuração inicial: situação e catálogo sugerido de funções', auth: 'coordinator' },
+  { method: 'post', path: `${C}/setup/duties`, summary: 'Criar as funções escolhidas do catálogo (não apaga nada)', auth: 'coordinator', body: setupDutiesSchema },
+  { method: 'post', path: `${C}/setup/complete`, summary: 'Marcar a configuração inicial como concluída', auth: 'coordinator' },
   { method: 'get', path: `${C}/overview`, summary: 'Painel inicial da coordenação', auth: 'coordinator' },
   { method: 'get', path: `${C}/pending`, summary: 'Pendências: recusas, sem resposta, trocas, mensagens com problema', auth: 'coordinator' },
   { method: 'get', path: `${C}/audit`, summary: 'Histórico de ações', auth: 'coordinator', query: { limit: 'Quantidade (1–200)', entityId: 'Filtrar por registro' } },
@@ -101,6 +110,7 @@ export const ROUTES: RouteDoc[] = [
   { method: 'post', path: `${C}/availability/{month}/send-now`, summary: 'Enviar o pedido agora (idempotente por pessoa)', auth: 'coordinator' },
   { method: 'post', path: `${C}/availability/{month}/cancel`, summary: 'Cancelar pedido ainda não enviado', auth: 'coordinator' },
   { method: 'post', path: `${C}/availability/{month}/notify-new`, summary: 'Avisar sobre cultos criados depois do pedido', auth: 'coordinator' },
+  { method: 'post', path: `${C}/availability/{month}/remind`, summary: 'Lembrar quem ainda não respondeu (no máximo um lembrete por pessoa por dia)', auth: 'coordinator' },
   // Mensagens
   { method: 'get', path: `${C}/messages`, summary: 'Caixa de saída com estados e motivos', auth: 'coordinator', query: { status: 'Estados separados por vírgula', kind: 'Tipo', before: 'Paginação por data', limit: '1–200' } },
   { method: 'get', path: `${C}/messages/{id}/simulated`, summary: 'Texto completo de mensagem SIMULADA (nunca de envio real)', auth: 'coordinator' },
@@ -122,7 +132,8 @@ export const ROUTES: RouteDoc[] = [
   { method: 'get', path: `${C}/scripts/{serviceId}`, summary: 'Roteiro: publicado para todos; rascunho para coordenação, pastores e quem prega', auth: 'session' },
   { method: 'post', path: `${C}/scripts/{serviceId}`, summary: 'Criar roteiro a partir de modelo', auth: 'coordinator', body: z.object({ templateId: z.string().nullable().optional() }) },
   { method: 'patch', path: `${C}/scripts/{serviceId}`, summary: 'Título, dados litúrgicos manuais, quem escolhe músicas, nota pastoral', auth: 'session', body: scriptUpdateSchema },
-  { method: 'put', path: `${C}/scripts/{serviceId}/blocks`, summary: 'Substituir blocos (ordem, textos, leituras, avisos)', auth: 'coordinator', body: blocksSchema },
+  { method: 'put', path: `${C}/scripts/{serviceId}/blocks`, summary: 'Substituir blocos (ordem, textos, leituras, avisos). Coordenação e pastores', auth: 'coordinator', body: blocksSchema },
+  { method: 'post', path: `${C}/scripts/{serviceId}/blocks/{blockId}/notify`, summary: 'Avisar pelo WhatsApp quem lê, com a referência', auth: 'coordinator' },
   { method: 'post', path: `${C}/scripts/{serviceId}/publish`, summary: 'Publicar versão imutável', auth: 'coordinator' },
   { method: 'get', path: `${C}/scripts/{serviceId}/versions`, summary: 'Versões publicadas e origem dos dados litúrgicos', auth: 'session' },
   { method: 'get', path: `${C}/scripts/{serviceId}/export`, summary: 'Exportar versão publicada', auth: 'session', query: { format: 'html | txt | json', version: 'Versão (padrão: última)' } },

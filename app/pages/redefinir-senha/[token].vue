@@ -6,6 +6,11 @@ const confirm = ref('')
 const error = ref('')
 const done = ref(false)
 const busy = ref(false)
+const brand = ref<RememberedBrand | null>(null)
+onMounted(() => {
+  brand.value = readRememberedBrand()
+})
+useHead(() => ({ htmlAttrs: { style: accentStyle(brand.value?.accent) } }))
 async function submit() {
   error.value = ''
   if (password.value.length < 10 || password.value !== confirm.value) {
@@ -29,45 +34,65 @@ async function submit() {
     id="conteudo"
     class="door"
   >
-    <div class="door__box">
-      <BrandMark class="door__mark" />
-      <h1>Nova senha</h1>
+    <div class="door__card stack-lg">
+      <DoorHead
+        :name="brand?.name"
+        :logo="brand?.logo"
+      />
       <template v-if="done">
-        <p class="lede">
-          Senha alterada. Por segurança, encerramos as sessões abertas em outros aparelhos.
-        </p>
+        <div>
+          <h1
+            class="h1"
+            style="font-size:28px"
+          >
+            Senha nova pronta
+          </h1>
+          <p
+            class="soft"
+            style="margin-top:6px"
+          >
+            Por segurança, as sessões abertas em outros aparelhos foram encerradas.
+          </p>
+        </div>
         <NuxtLink
-          class="btn btn--primary btn--block"
-          style="margin-top:1.5rem"
           to="/entrar"
-        >Entrar</NuxtLink>
+          class="btn"
+        >
+          Entrar
+        </NuxtLink>
       </template>
       <form
         v-else
+        class="stack-md"
         novalidate
         @submit.prevent="submit"
       >
+        <h1
+          class="h1"
+          style="font-size:28px"
+        >
+          Crie uma senha nova
+        </h1>
         <PasswordField
           v-model="password"
           label="Nova senha"
           autocomplete="new-password"
-          hint="Pelo menos 10 caracteres."
+          placeholder="pelo menos 10 caracteres"
         />
         <PasswordField
           v-model="confirm"
-          label="Repita a nova senha"
+          label="Repita a senha"
           autocomplete="new-password"
         />
         <p
           v-if="error"
-          class="field__error"
+          class="form-error"
           role="alert"
         >
           {{ error }}
         </p>
         <button
-          class="btn btn--primary btn--block"
-          style="margin-top:1.5rem"
+          class="btn"
           :disabled="busy"
         >
           Salvar senha

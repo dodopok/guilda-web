@@ -7,6 +7,7 @@ import {
   duties,
   liturgicalSnapshots,
   liturgyTemplates,
+  outboundMessages,
   people,
   scheduleMonths,
   scriptBlocks,
@@ -176,14 +177,27 @@ export async function createScript(db: Db, ctx: ChurchContext, serviceId: string
       templateId: templateId ?? null,
       title: service.title,
     }).returning()
+    // Avisos marcados como "todo domingo" no roteiro mais recente voltam automaticamente.
+    const fixedItems = blocks.some((b) => b.type === 'announcements') ? await latestFixedAnnouncements(tx, ctx.church.id, serviceId) : []
     if (blocks.length) {
       await tx.insert(scriptBlocks).values(blocks.map((b, i) => ({
-        churchId: ctx.church.id, scriptId: script!.id, position: i, type: b.type, title: b.title, body: b.body, textSource: b.textSource, dutyId: b.dutyId, data: {},
+        churchId: ctx.church.id, scriptId: script!.id, position: i, type: b.type, title: b.title, body: b.body, textSource: b.textSource, dutyId: b.dutyId,
+        data: b.type === 'announcements' && fixedItems.length
+          ? { items: fixedItems }
+          : b.type === 'rite' || b.type === 'text' ? { templateBody: b.body } : {},
       })))
     }
     await audit(tx, { churchId: ctx.church.id, actorAccountId: ctx.accountId, action: 'script.created', entityType: 'script', entityId: script!.id, data: { templateId } })
     return script!
   })
+}
+
+async function latestFixedAnnouncements(db: DbOrTx, churchId: string, exceptServiceId: string) {
+  const rows = await db.select({ data: scriptBlocks.data }).from(scriptBlocks)
+    .innerJoin(serviceScripts, and(eq(serviceScripts.churchId, scriptBlocks.churchId), eq(serviceScripts.id, scriptBlocks.scriptId)))
+    .where(and(eq(scriptBlocks.churchId, churchId), eq(scriptBlocks.type, 'announcements'), ne(serviceScripts.serviceId, exceptServiceId)))
+    .orderBy(desc(serviceScripts.updatedAt)).limit(1)
+  return (rows[0]?.data.items ?? []).filter((i) => i.fixed).map((i) => ({ text: i.text, fixed: true, status: 'ready' as const }))
 }
 
 interface Responsible { personId: string, name: string, status: string, scheduled: boolean }
@@ -234,7 +248,9 @@ export async function getScript(db: Db, ctx: ChurchContext, serviceId: string) {
       kind: service.kind,
       status: service.status,
     },
-    canEdit: isCoordinator(ctx),
+    // Pastores editam o rascunho (revisão informal); publicar é da coordenação.
+    canEdit: isCoordinator(ctx) || isPastor(ctx),
+    canPublish: isCoordinator(ctx),
     canChooseMusic: script ? await canChooseMusic(db, ctx, serviceId, script.musicChooser) : false,
     published: latest ? { version: latest.version, publishedAt: latest.createdAt, content: latest.content } : null,
   }
@@ -247,6 +263,9 @@ export async function getScript(db: Db, ctx: ChurchContext, serviceId: string) {
   const responsibles = await resolveResponsibles(db, ctx, serviceId, blocks)
   const songIds = blocks.flatMap((b) => b.data.songIds ?? [])
   const songRows = songIds.length ? await db.select().from(songs).where(and(eq(songs.churchId, ctx.church.id), inArray(songs.id, songIds))) : []
+  const noticeRows = await db.select({ key: outboundMessages.idempotencyKey }).from(outboundMessages)
+    .where(and(eq(outboundMessages.churchId, ctx.church.id), sql`${outboundMessages.idempotencyKey} like ${`reading:${script.id}:%`}`, ne(outboundMessages.status, 'cancelled')))
+  const noticeKeys = new Set(noticeRows.map((r) => r.key))
   const snapshot = script.liturgicalSnapshotId
     ? await db.query.liturgicalSnapshots.findFirst({ where: and(eq(liturgicalSnapshots.churchId, ctx.church.id), eq(liturgicalSnapshots.id, script.liturgicalSnapshotId)) })
     : null
@@ -275,6 +294,7 @@ export async function getScript(db: Db, ctx: ChurchContext, serviceId: string) {
         data: b.data,
         responsibles: responsibles.get(b.id) ?? [],
         songs: (b.data.songIds ?? []).map((id) => songRows.find((s) => s.id === id)).filter(Boolean),
+        readerNotified: b.personId && b.data.reference ? noticeKeys.has(readingNoticeKey(script.id, b.personId, b.title, b.data.reference.trim())) : false,
       })),
       hasUnpublishedChanges: !latest || script.updatedAt > latest.createdAt,
     },
@@ -338,21 +358,25 @@ const scriptBlockSchema = z.object({
   personId: z.string().uuid().nullable().optional(),
   data: z.object({
     reference: z.string().trim().max(200).optional(),
+    alternatives: z.array(z.string().trim().min(1).max(200)).max(6).optional(),
     source: z.enum(['estevao', 'manual']).optional(),
     songIds: z.array(z.string().uuid()).max(30).optional(),
     items: z.array(z.object({
       text: z.string().trim().min(1).max(1000),
       ownerPersonId: z.string().uuid().nullable().optional(),
       status: z.enum(['draft', 'ready']).default('draft'),
+      fixed: z.boolean().optional(),
     })).max(50).optional(),
+    templateBody: z.string().max(20000).nullable().optional(),
   }).default({}),
 })
 
 export const blocksSchema = z.object({ blocks: z.array(scriptBlockSchema).max(200) })
 
-// Substitui a lista de blocos (ordem, textos, leituras, avisos). Edição livre da coordenação.
+// Substitui a lista de blocos (ordem, textos, leituras, avisos). Coordenação e pastores
+// editam o rascunho; só a coordenação publica.
 export async function replaceBlocks(db: Db, ctx: ChurchContext, serviceId: string, raw: z.input<typeof blocksSchema>) {
-  requireCoordinator(ctx)
+  if (!isCoordinator(ctx) && !isPastor(ctx)) throw forbidden()
   const input = blocksSchema.parse(raw)
   await db.transaction(async (tx) => {
     const script = await loadScript(tx, ctx, serviceId)
@@ -424,14 +448,21 @@ export async function fetchSuggestions(db: Db, ctx: ChurchContext, serviceId: st
 export const applySchema = z.object({
   snapshotId: z.string().uuid(),
   collectIndex: z.number().int().min(0).nullable().optional(),
-  readings: z.array(z.object({ key: z.string(), reference: z.string().trim().min(1).max(200), label: z.string().trim().min(1).max(120) })).max(12).default([]),
+  readings: z.array(z.object({
+    key: z.string(),
+    reference: z.string().trim().min(1).max(200),
+    label: z.string().trim().min(1).max(120),
+    // Alternativas do lecionário, guardadas para trocar com um toque no roteiro.
+    alternatives: z.array(z.string().trim().min(1).max(200)).max(6).default([]),
+  })).max(12).default([]),
   replaceReadings: z.boolean().default(true),
   applyCalendar: z.boolean().default(true),
 })
 
 // Aplica ao roteiro as escolhas da coordenação a partir de uma foto do Estêvão.
-export async function applySuggestions(db: Db, ctx: ChurchContext, serviceId: string, input: z.infer<typeof applySchema>) {
+export async function applySuggestions(db: Db, ctx: ChurchContext, serviceId: string, raw: z.input<typeof applySchema>) {
   requireCoordinator(ctx)
+  const input = applySchema.parse(raw)
   await db.transaction(async (tx) => {
     const script = await loadScript(tx, ctx, serviceId)
     if (!script) throw notFound('Roteiro')
@@ -465,7 +496,7 @@ export async function applySuggestions(db: Db, ctx: ChurchContext, serviceId: st
           // Mantém a pessoa já atribuída à leitura na mesma posição, se houver.
           dutyId: previous?.dutyId ?? readingDuty?.id ?? null,
           personId: previous?.personId ?? null,
-          data: { reference: r.reference, source: 'estevao' as const },
+          data: { reference: r.reference, source: 'estevao' as const, ...(r.alternatives.length ? { alternatives: r.alternatives } : {}) },
         }
       })
       if (input.replaceReadings) {
@@ -623,6 +654,36 @@ export async function notifyMusic(db: Db, ctx: ChurchContext, serviceId: string)
   }
   await audit(db, { churchId: ctx.church.id, actorAccountId: ctx.accountId, action: 'script.music_notified', entityType: 'script', entityId: script.id, data: { recipients: team.length } })
   return { recipients: team.length, queued, blocked }
+}
+
+// Chave do aviso de leitura: muda se a pessoa, a leitura ou a referência mudarem, e só
+// então um novo aviso pode sair. Os blocos são recriados ao salvar, por isso não usa o id.
+export function readingNoticeKey(scriptId: string, personId: string, title: string, reference: string) {
+  return `reading:${scriptId}:${personId}:${sha256(`${title}|${reference}`).slice(0, 16)}`
+}
+
+// Avisa pelo WhatsApp a pessoa escolhida para uma leitura, com a referência.
+export async function notifyReader(db: Db, ctx: ChurchContext, serviceId: string, blockId: string) {
+  if (!isCoordinator(ctx) && !isPastor(ctx)) throw forbidden()
+  const script = await loadScript(db, ctx, serviceId)
+  if (!script) throw notFound('Roteiro')
+  const block = await db.query.scriptBlocks.findFirst({ where: and(eq(scriptBlocks.churchId, ctx.church.id), eq(scriptBlocks.scriptId, script.id), eq(scriptBlocks.id, blockId)) })
+  if (!block || (block.type !== 'reading' && block.type !== 'psalm')) throw notFound('Leitura')
+  const reference = block.data.reference?.trim()
+  if (!block.personId) throw badRequest('no_reader', 'Escolha quem lê antes de avisar.')
+  if (!reference) throw badRequest('no_reference', 'Informe a referência da leitura antes de avisar.')
+  const person = await db.query.people.findFirst({ where: and(eq(people.churchId, ctx.church.id), eq(people.id, block.personId)) })
+  if (!person) throw notFound('Pessoa')
+  const service = await loadService(db, ctx, serviceId)
+  const msg = await enqueueMessage(db, {
+    churchId: ctx.church.id,
+    personId: person.id,
+    kind: 'reading_notice',
+    idempotencyKey: readingNoticeKey(script.id, person.id, block.title, reference),
+    params: [firstName(person.displayName), block.title, formatServiceDate(service.startsAt, ctx.church.timezone), ctx.church.name, reference, `${getConfig().appBaseUrl}/i/${ctx.church.slug}/roteiros/${serviceId}`],
+  })
+  await audit(db, { churchId: ctx.church.id, actorAccountId: ctx.accountId, action: 'script.reader_notified', entityType: 'script', entityId: script.id, data: { personId: person.id } })
+  return { status: msg.status, blockedReason: msg.blockedReason }
 }
 
 // ---------------------------------------------------------------------------

@@ -2,7 +2,7 @@ import { and, asc, eq, inArray, lte, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { getConfig } from '../config'
 import type { Db, DbOrTx } from '../db/client'
-import { assignments, availabilityRequests, availabilityResponses, churches, outboundMessages, people, qualifications, scheduleMonths, services, slots, unavailabilities } from '../db/schema'
+import { assignments, availabilityRequests, availabilityResponses, churches, consents, outboundMessages, people, qualifications, scheduleMonths, serviceScripts, services, slots, unavailabilities } from '../db/schema'
 import { sha256 } from '../lib/crypto'
 import { badRequest, notFound } from '../lib/errors'
 import { formatDateShort, formatServiceDate, localParts, monthName } from '../lib/time'
@@ -10,6 +10,7 @@ import { firstName } from '../lib/text'
 import { audit } from './audit'
 import { type ChurchContext, type ChurchRow, isCoordinator, requireCoordinator, requirePerson } from './context'
 import { enqueueMessage } from './messaging/outbox'
+import { TEMPLATES } from './messaging/templates'
 
 export const requestSchema = z.object({
   sendAt: z.coerce.date(),
@@ -112,6 +113,32 @@ async function dispatchRequest(db: Db, church: ChurchRow, requestId: string) {
   return { requestId, queued, blocked }
 }
 
+// Lembra quem ainda não respondeu. No máximo um lembrete por pessoa por dia: repetir o
+// pedido no mesmo dia não duplica mensagens.
+export async function remindSilent(db: Db, ctx: ChurchContext, month: string, now = new Date()) {
+  requireCoordinator(ctx)
+  const req = await getRequest(db, ctx.church.id, month)
+  if (!req || req.status !== 'sent') throw badRequest('not_sent', 'O pedido do mês ainda não foi enviado.')
+  const answered = new Set((await db.select({ personId: availabilityResponses.personId }).from(availabilityResponses).where(eq(availabilityResponses.requestId, req.id))).map((r) => r.personId))
+  const day = localParts(now, ctx.church.timezone).date
+  let queued = 0
+  let blocked = 0
+  for (const p of await schedulablePeople(db, ctx.church.id)) {
+    if (answered.has(p.id)) continue
+    const msg = await enqueueMessage(db, {
+      churchId: ctx.church.id,
+      personId: p.id,
+      kind: 'availability_request',
+      idempotencyKey: `availability-remind:${req.id}:${day}:${p.id}`,
+      params: [firstName(p.displayName), monthName(month), ctx.church.name, formatServiceDate(req.deadlineAt, ctx.church.timezone), `${getConfig().appBaseUrl}/i/${ctx.church.slug}/disponibilidade/${month}`],
+    })
+    if (msg.status === 'blocked') blocked++
+    else queued++
+  }
+  await audit(db, { churchId: ctx.church.id, actorAccountId: ctx.accountId, action: 'availability.reminded', entityType: 'availability_request', entityId: req.id, data: { queued, blocked } })
+  return { queued, blocked }
+}
+
 // Culto criado depois do pedido: avisa as pessoas para marcarem também esse culto.
 export async function notifyNewServices(db: Db, ctx: ChurchContext, month: string) {
   requireCoordinator(ctx)
@@ -159,6 +186,11 @@ export async function getAvailabilityFor(db: Db, ctx: ChurchContext, month: stri
     ? await db.query.availabilityResponses.findFirst({ where: and(eq(availabilityResponses.requestId, req.id), eq(availabilityResponses.personId, target)) })
     : null
   const unavailableSet = new Set(mine.map((m) => m.serviceId))
+  const scripts = svc.length
+    ? await db.select({ serviceId: serviceScripts.serviceId, liturgy: serviceScripts.liturgy }).from(serviceScripts)
+        .where(and(eq(serviceScripts.churchId, ctx.church.id), inArray(serviceScripts.serviceId, svc.map((s) => s.id))))
+    : []
+  const liturgyOf = new Map(scripts.map((r) => [r.serviceId, r.liturgy as { color?: string | null, season?: string | null }]))
   return {
     month,
     monthLabel: monthName(month),
@@ -173,6 +205,7 @@ export async function getAvailabilityFor(db: Db, ctx: ChurchContext, month: stri
       location: s.location,
       kind: s.kind,
       unavailable: unavailableSet.has(s.id),
+      liturgy: { color: liturgyOf.get(s.id)?.color ?? null, season: liturgyOf.get(s.id)?.season ?? null },
       // Culto cadastrado depois da última resposta da pessoa.
       isNew: Boolean(response && s.createdAt > response.updatedAt),
     })),
@@ -260,6 +293,14 @@ export async function availabilityDashboard(db: Db, ctx: ChurchContext, month: s
     ? await db.select().from(outboundMessages).where(and(eq(outboundMessages.churchId, ctx.church.id), sql`${outboundMessages.idempotencyKey} like ${`availability:${req.id}:%`}`))
     : []
   const msgByPerson = new Map(messages.map((m) => [m.personId, m]))
+  // Quem pode receber pelo WhatsApp (telefone e consentimento), para a coordenação saber
+  // a quem perguntar pessoalmente.
+  const contact = list.length
+    ? await db.select({ id: people.id, phone: people.phoneE164 }).from(people).where(and(eq(people.churchId, ctx.church.id), inArray(people.id, list.map((p) => p.id))))
+    : []
+  const granted = new Set((await db.select({ personId: consents.personId }).from(consents)
+    .where(and(eq(consents.churchId, ctx.church.id), eq(consents.status, 'granted')))).map((c) => c.personId))
+  const phoneOf = new Map(contact.map((c) => [c.id, c.phone]))
   const respByPerson = new Map(responses.map((r) => [r.personId, r]))
   const nameOf = new Map(list.map((p) => [p.id, p.displayName]))
   const peopleRows = list.map((p) => {
@@ -275,6 +316,7 @@ export async function availabilityDashboard(db: Db, ctx: ChurchContext, month: s
       source: r?.source ?? null,
       changedAfterDeadline: Boolean(r && req && r.updatedAt > req.deadlineAt),
       unavailableServiceIds: mine.map((u) => u.serviceId),
+      whatsapp: !phoneOf.get(p.id) ? 'no_phone' : granted.has(p.id) ? 'ok' : 'no_consent',
       message: m ? { status: m.status, blockedReason: m.blockedReason } : null,
     }
   })
@@ -282,6 +324,9 @@ export async function availabilityDashboard(db: Db, ctx: ChurchContext, month: s
     month,
     monthLabel: monthName(month),
     request: req ? { id: req.id, status: req.status, sendAt: req.sendAt, deadlineAt: req.deadlineAt, sentAt: req.sentAt } : null,
+    // Texto exato do modelo enviado, com {{n}}: primeiro nome, mês, igreja, prazo, link.
+    templateBody: TEMPLATES.availability_request.body,
+    link: `${getConfig().appBaseUrl}/i/${ctx.church.slug}/disponibilidade/${month}`,
     summary: {
       people: peopleRows.length,
       responded: peopleRows.filter((p) => p.responded).length,

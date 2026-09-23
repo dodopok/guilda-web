@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Conjunto pequeno de ícones desenhados no mesmo traço (1.8), sem biblioteca externa.
-const props = defineProps<{ name: string, label?: string }>()
+const props = withDefaults(defineProps<{ name: string, label?: string, weight?: number | string }>(), { weight: 1.8 })
 const paths: Record<string, string> = {
   'check': 'M4.5 12.5l4.5 4.5L19.5 6.5',
   'x': 'M6 6l12 12M18 6L6 18',
@@ -34,6 +34,10 @@ const paths: Record<string, string> = {
   'edit': 'M4.5 19.5l1-4.5L16 4.5l3.5 3.5L9 18.5zM13.5 7l3.5 3.5',
   'people': 'M9 11a3.5 3.5 0 1 0 0-7a3.5 3.5 0 0 0 0 7zM2.5 19.5c.6-3.2 3.1-5 6.5-5s5.9 1.8 6.5 5M16 4.5a3.5 3.5 0 0 1 0 6.5M18 14.8c2 .6 3.2 2.2 3.5 4.7',
   'message': 'M4.5 5.5h15v10h-9L6 19.5v-4H4.5z',
+  'sparkle': 'M12 3v4M12 17v4M3 12h4M17 12h4M6.3 6.3l2.8 2.8M14.9 14.9l2.8 2.8M6.3 17.7l2.8-2.8M14.9 9.1l2.8-2.8',
+  'upload': 'M12 15V4M7 8.5L12 3.5l5 5M5 19.5h14',
+  'chevron-up': 'M18 14.5l-6-6-6 6',
+  'chevron-left': 'M14.5 6l-6 6 6 6',
 }
 const d = computed(() => paths[props.name] ?? paths.circle)
 </script>
@@ -43,7 +47,7 @@ const d = computed(() => paths[props.name] ?? paths.circle)
     viewBox="0 0 24 24"
     fill="none"
     stroke="currentColor"
-    stroke-width="1.8"
+    :stroke-width="weight"
     stroke-linecap="round"
     stroke-linejoin="round"
     :role="label ? 'img' : undefined"

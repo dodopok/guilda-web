@@ -22,6 +22,15 @@ const ACTIONS: Record<string, string> = {
 
 <template>
   <div class="page">
+    <NuxtLink
+      :to="`/i/${$route.params.slug}/coordenacao/configuracoes`"
+      class="back"
+    >
+      <Icon
+        name="arrow-left"
+        :weight="2"
+      />Configurações
+    </NuxtLink>
     <div class="page-head">
       <p class="kicker">
         Comunicação

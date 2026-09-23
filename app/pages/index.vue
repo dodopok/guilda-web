@@ -11,61 +11,54 @@ if (memberships.value.length === 1 && !me.value?.account.isPlatformAdmin) {
     id="conteudo"
     class="door"
   >
-    <div class="door__box">
-      <BrandMark class="door__mark" />
-      <h1>Olá, {{ me?.account.displayName.split(' ')[0] }}</h1>
-      <p
+    <div class="door__card stack-lg">
+      <DoorHead />
+      <div>
+        <h1
+          class="h1"
+          style="font-size:28px"
+        >
+          Oi, {{ me?.account.displayName.split(' ')[0] }}!
+        </h1>
+        <p
+          class="soft"
+          style="margin-top:6px"
+        >
+          {{ memberships.length ? 'Escolha a igreja.' : 'Sua conta ainda não participa de nenhuma igreja.' }}
+        </p>
+      </div>
+      <div
         v-if="memberships.length"
-        class="lede"
+        class="card card--flush list"
       >
-        Escolha a igreja.
-      </p>
-      <p
-        v-else
-        class="lede"
-      >
-        Sua conta ainda não participa de nenhuma igreja.
-      </p>
-      <ul
-        v-if="memberships.length"
-        class="lines"
-        style="margin-top:1.5rem"
-      >
-        <li
+        <NuxtLink
           v-for="m in memberships"
           :key="m.churchId"
+          :to="`/i/${m.slug}`"
+          class="listrow"
         >
-          <NuxtLink
-            :to="`/i/${m.slug}`"
-            class="line"
-            style="text-decoration:none;color:inherit"
-          >
-            <span class="line__main">
-              <span
-                class="line__title serif"
-                style="font-size:1.3rem"
-              >{{ m.name }}</span>
-              <span
-                class="line__sub"
-                style="display:block"
-              >{{ m.roles.map((r) => ROLE_LABEL[r]).join(' · ') }}</span>
-            </span>
-            <Icon
-              name="arrow-right"
-              style="width:1.3rem;height:1.3rem"
-            />
-          </NuxtLink>
-        </li>
-      </ul>
-      <p
+          <ChurchMark
+            :name="m.name"
+            :size="38"
+            :radius="12"
+          />
+          <span class="grow strong">{{ m.name }}</span>
+          <Icon
+            name="chevron-right"
+            class="listrow__chev"
+          />
+        </NuxtLink>
+      </div>
+      <NuxtLink
         v-if="me?.account.isPlatformAdmin"
-        style="margin-top:1.5rem"
+        to="/admin/igrejas"
+        class="btn btn--secondary"
       >
-        <NuxtLink to="/admin/igrejas">Cadastrar igreja</NuxtLink>
-      </p>
+        Cadastrar igreja
+      </NuxtLink>
       <button
-        class="btn btn--quiet"
-        style="margin-top:2rem"
+        type="button"
+        class="link link--muted"
         @click="logout"
       >
         Sair

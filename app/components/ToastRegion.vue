@@ -14,8 +14,7 @@ const { toasts } = useToast()
       class="toast"
       :class="{ 'toast--error': t.kind === 'error' }"
     >
-      <Icon :name="t.kind === 'error' ? 'alert' : 'check'" />
-      <span>{{ t.text }}</span>
+      {{ t.text }}
     </div>
   </div>
 </template>

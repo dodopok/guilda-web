@@ -1,243 +1,303 @@
 <script setup lang="ts">
 useHead({ title: 'Mesa da coordenação' })
 const route = useRoute()
-const { capi, link, tz, info } = useChurch()
+const { capi, tz, link, prepMonth, info } = useChurch()
+const { me } = useSession()
 
 interface MonthInfo {
   month: string
   monthLabel: string
   services: number
   firstServiceAt: string | null
+  nextServiceAt: string | null
+  slots: { required: number, filled: number }
+  scheduledPeople: number
+  pendingConfirmations: number
   schedule: { status: string, version: number, publishedAt: string | null }
   availability: { status: string, sendAt: string, deadlineAt: string, responses: number } | null
 }
 interface Overview {
-  counts: { duties: number, people: number, qualifiedPeople: number, withPhone: number, withConsent: number, withAccount: number, templates: number }
+  counts: { duties: number, people: number, withAccount: number, withConsent: number }
   months: MonthInfo[]
-  whatsapp: { mode: string, coexistence: string }
-  reminder: { enabled: boolean, weekday: number, time: string }
-  attention: { declined: number, messageProblems: number, blockedMessages: number }
+  whatsapp: { mode: string }
+  attention: { declined: number, messageProblems: number }
 }
-const { data } = await useAsyncData(`overview-${route.params.slug}`, () => capi<Overview>('/overview'))
+interface Declined { assignmentId: string, personName: string, dutyName: string, serviceId: string, startsAt: string }
+const { data } = await useAsyncData(`desk-${route.params.slug}`, async () => {
+  const [overview, pending] = await Promise.all([capi<Overview>('/overview'), capi<{ declined: Declined[] }>('/pending')])
+  return { overview, declined: pending.declined }
+})
+const firstName = computed(() => (me.value?.account.displayName ?? '').replace(/^(Pr|Pra|Rev|Revda?)\.\s*/i, '').split(' ')[0] ?? '')
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+const prep = computed(() => data.value?.overview.months.find((m) => m.month === prepMonth.value) ?? data.value?.overview.months[1] ?? null)
+const current = computed(() => data.value?.overview.months.find((m) => m.month !== prep.value?.month) ?? null)
 
-type Step = { done: boolean, now?: boolean, title: string, detail: string, action?: { label: string, to: string } }
-function monthSteps(m: MonthInfo, people: number): Step[] {
-  const steps: Step[] = []
-  steps.push({
-    done: m.services > 0,
-    title: m.services ? `${m.services} ${m.services === 1 ? 'culto cadastrado' : 'cultos cadastrados'}` : 'Cadastrar os cultos',
-    detail: m.services ? `O primeiro é ${m.firstServiceAt ? longDate(m.firstServiceAt, tz.value) : '—'}.` : 'Os cultos precisam existir antes de pedir as indisponibilidades.',
-    action: { label: m.services ? 'Ver cultos' : 'Cadastrar cultos', to: link(`/coordenacao/cultos/${m.month}`) },
-  })
-  const av = m.availability
+type StepState = 'done' | 'now' | 'progress' | 'todo'
+const journey = computed(() => {
+  const m = prep.value
+  if (!m) return []
   const published = m.schedule.status === 'published'
-  steps.push({
-    done: av?.status === 'sent' || (published && !av),
-    title: published && !av ? 'Escala feita sem pedido pelo app' : !av || av.status === 'cancelled' ? 'Pedir as indisponibilidades' : av.status === 'scheduled' ? `Pedido agendado para ${dateTime(av.sendAt, tz.value)}` : `${av.responses} de ${people} responderam`,
-    detail: published && !av
-      ? 'As indisponibilidades deste mês não foram coletadas pelo app.'
-      : !av || av.status === 'cancelled'
-          ? 'Uma mensagem leva cada pessoa ao app para marcar os cultos em que não pode servir.'
-          : `Prazo: ${longDate(av.deadlineAt, tz.value)}, ${time(av.deadlineAt, tz.value)}.`,
-    action: { label: av ? 'Acompanhar respostas' : 'Agendar pedido', to: link(`/coordenacao/disponibilidade/${m.month}`) },
-  })
-  steps.push({
-    done: m.schedule.status === 'published',
-    title: m.schedule.status === 'published' ? `Escala publicada (versão ${m.schedule.version})` : 'Montar e publicar a escala',
-    detail: m.schedule.status === 'published' && m.schedule.publishedAt ? `Publicada em ${dateTime(m.schedule.publishedAt, tz.value)}. Alterações geram nova versão e avisos só aos afetados.` : 'O editor aponta vagas, choques, indisponibilidades e quem ficou sem domingo livre.',
-    action: { label: m.schedule.status === 'published' ? 'Abrir escala' : 'Montar escala', to: link(`/coordenacao/escalas/${m.month}`) },
-  })
-  const firstOpen = steps.findIndex((s) => !s.done)
-  if (firstOpen >= 0) steps[firstOpen]!.now = true
-  return steps
-}
-
-const setup = computed<Step[]>(() => {
-  const c = data.value?.counts
-  if (!c) return []
+  const req = m.availability
+  const s1: StepState = m.services ? 'done' : 'now'
+  const skipped = !req && m.slots.filled > 0
+  const s2: StepState = !m.services ? 'todo' : published || skipped ? 'done' : req?.status === 'sent' ? 'progress' : 'now'
+  const s3: StepState = published ? 'done' : s2 === 'progress' || s2 === 'done' ? 'now' : 'todo'
+  const s4: StepState = published ? 'done' : 'todo'
+  const people = data.value!.overview.counts.people
   return [
-    { done: c.duties > 0, title: 'Funções e instruções', detail: `${c.duties} funções ativas.`, action: { label: 'Funções', to: link('/coordenacao/funcoes') } },
-    { done: c.qualifiedPeople >= 3, title: 'Pessoas e habilitações', detail: `${c.people} pessoas, ${c.qualifiedPeople} com alguma função.`, action: { label: 'Pessoas', to: link('/coordenacao/pessoas') } },
-    { done: c.withConsent > 0 && c.withConsent >= c.withPhone * 0.5, title: 'Telefones e consentimento', detail: `${c.withPhone} com telefone, ${c.withConsent} autorizaram mensagens.`, action: { label: 'Registrar', to: link('/coordenacao/pessoas?filtro=sem-consentimento') } },
-    { done: c.withAccount >= c.people * 0.5, title: 'Convites de acesso', detail: `${c.withAccount} de ${c.people} já criaram senha.`, action: { label: 'Convidar', to: link('/coordenacao/pessoas?filtro=sem-acesso') } },
-    { done: data.value!.whatsapp.mode !== 'disabled', title: 'Canal do WhatsApp', detail: data.value!.whatsapp.mode === 'cloud_api' ? 'Canal oficial (Cloud API) configurado.' : data.value!.whatsapp.mode === 'ycloud' ? 'Canal oficial pelo YCloud configurado.' : data.value!.whatsapp.mode === 'simulation' ? 'Em simulação: mensagens não saem do servidor.' : 'Desativado.', action: { label: 'Canal', to: link('/coordenacao/whatsapp') } },
-    { done: c.templates > 0, title: 'Modelos de liturgia', detail: `${c.templates} modelos.`, action: { label: 'Modelos', to: link('/coordenacao/modelos') } },
+    { n: 1, state: s1, title: m.services ? plural(m.services, 'culto marcado', 'cultos marcados') : 'Marcar os cultos do mês', sub: m.firstServiceAt ? `O primeiro é ${weekdayLong(m.firstServiceAt, tz.value).replace('-feira', '')}, ${dayMonth(m.firstServiceAt, tz.value)}` : 'Já sugerimos os domingos; você ajusta' },
+    {
+      n: 2,
+      state: s2,
+      title: skipped ? 'Escala feita sem perguntar pelo app' : !req || req.status === 'cancelled' ? 'Perguntar quem não pode' : req.status === 'scheduled' ? `Pedido agendado para ${weekdayLong(req.sendAt, tz.value).replace('-feira', '')}, ${shortDate(req.sendAt, tz.value)}` : `${req.responses} de ${people} já responderam`,
+      sub: req?.status === 'sent' ? `Prazo: ${weekdayLong(req.deadlineAt, tz.value).replace('-feira', '')}, ${dayMonth(req.deadlineAt, tz.value)}, ${time(req.deadlineAt, tz.value)}` : 'Cada pessoa marca no app os cultos em que não pode',
+    },
+    { n: 3, state: s3, title: published ? 'Escala montada' : m.slots.filled ? `Escala em andamento: ${m.slots.filled} de ${m.slots.required} vagas` : 'Montar a escala', sub: published ? 'Todas as vagas revisadas' : 'A gente sugere quem escalar; você só confirma' },
+    { n: 4, state: s4, title: published ? `Publicada · versão ${m.schedule.version}` : 'Publicar e avisar', sub: published ? 'Todo mundo já pode ver no app' : 'Cada pessoa recebe suas tarefas pelo WhatsApp' },
   ]
 })
-const setupPending = computed(() => setup.value.filter((s) => !s.done).length)
-const attentionTotal = computed(() => {
-  const a = data.value?.attention
-  return a ? a.declined + a.messageProblems : 0
-})
+const nowStep = computed(() => journey.value.find((j) => j.state === 'now')?.n ?? (prep.value?.schedule.status === 'published' ? 4 : 3))
+const published = computed(() => prep.value?.schedule.status === 'published')
+const ctaLabel = computed(() => (published.value ? 'Ver a escala publicada' : nowStep.value === 1 ? 'Continuar: marcar os cultos' : nowStep.value === 2 ? 'Continuar: perguntar quem não pode' : nowStep.value === 3 ? 'Continuar: montar a escala' : 'Continuar: publicar'))
+const ctaTo = computed(() => (published.value ? link(`/escala/${prep.value!.month}`) : link(`/coordenacao/preparar/${prep.value!.month}?passo=${nowStep.value}`)))
+const substituteLink = (d: Declined) => link(`/coordenacao/preparar/${localDateKey(d.startsAt, tz.value).slice(0, 7)}?passo=3&culto=${d.serviceId}`)
+const waMode = computed(() => info.value?.whatsappMode ?? data.value?.overview.whatsapp.mode)
 </script>
 
 <template>
-  <div class="page page--wide">
-    <div class="page-head">
-      <p class="kicker">
-        Mesa da coordenação
+  <section
+    v-if="data"
+    class="stack-lg"
+  >
+    <div>
+      <p class="eyebrow">
+        Coordenação · {{ longDate(new Date(), tz) }}
       </p>
-      <h1>{{ info?.church.name }}</h1>
+      <h1 class="h1">
+        Oi, {{ firstName }}!
+      </h1>
     </div>
-    <template v-if="data">
-      <div
-        v-if="attentionTotal"
-        class="notice notice--no"
-        style="margin-bottom:2rem"
+
+    <div
+      v-if="data.declined.length || data.overview.attention.messageProblems"
+      class="panel panel--no"
+    >
+      <p
+        class="strong row"
+        style="gap:8px;color:var(--no-ink);margin-bottom:8px"
       >
-        <h3>Pede atenção agora</h3>
-        <p>
-          <template v-if="data.attention.declined">
-            {{ plural(data.attention.declined, 'tarefa recusada', 'tarefas recusadas') }} sem substituto.
-          </template>
-          <template v-if="data.attention.messageProblems">
-            {{ plural(data.attention.messageProblems, 'mensagem com falha', 'mensagens com falha') }} no envio.
-          </template>
+        <Icon
+          name="alert"
+          :weight="2"
+          style="width:20px;height:20px"
+        />Pede sua atenção
+      </p>
+      <div
+        v-for="d in data.declined"
+        :key="d.assignmentId"
+        class="row"
+        style="padding:6px 0"
+      >
+        <p
+          class="grow"
+          style="min-width:200px;color:#5a2a22"
+        >
+          <strong>{{ d.personName }}</strong> avisou que não pode: {{ d.dutyName }}, {{ longDate(d.startsAt, tz) }}.
         </p>
-        <div class="row">
-          <NuxtLink
-            v-if="data.attention.declined"
-            class="btn btn--small"
-            :to="link('/coordenacao/pendencias')"
-          >Ver pendências</NuxtLink>
-          <NuxtLink
-            v-if="data.attention.messageProblems"
-            class="btn btn--small"
-            :to="link('/coordenacao/mensagens?status=failed,unknown')"
-          >Ver mensagens</NuxtLink>
-        </div>
+        <NuxtLink
+          :to="substituteLink(d)"
+          class="btn btn--white btn--sm"
+          style="color:var(--no-ink)"
+        >
+          Escolher substituto
+        </NuxtLink>
       </div>
+      <div
+        v-if="data.overview.attention.messageProblems"
+        class="row"
+        style="padding:6px 0"
+      >
+        <p
+          class="grow"
+          style="min-width:200px;color:#5a2a22"
+        >
+          {{ plural(data.overview.attention.messageProblems, 'mensagem não saiu', 'mensagens não saíram') }} (falha ou envio incerto).
+        </p>
+        <NuxtLink
+          :to="link('/coordenacao/mensagens?status=failed,unknown')"
+          class="btn btn--white btn--sm"
+          style="color:var(--no-ink)"
+        >
+          Ver mensagens
+        </NuxtLink>
+      </div>
+    </div>
 
-      <div class="split">
-        <div>
-          <section
-            v-for="m in [...data.months].reverse()"
-            :key="m.month"
-            class="section"
-            style="margin-top:0;margin-bottom:2.5rem"
+    <article
+      v-if="prep"
+      class="card card--lg card--rel"
+    >
+      <svg
+        viewBox="0 0 120 120"
+        aria-hidden="true"
+        class="rings"
+        style="right:-28px;top:-34px;opacity:.5"
+      ><circle
+        cx="60"
+        cy="40"
+        r="26"
+        fill="none"
+        stroke="var(--accent-mid)"
+        stroke-width="3"
+      /><circle
+        cx="42"
+        cy="72"
+        r="26"
+        fill="none"
+        stroke="var(--accent-mid)"
+        stroke-width="3"
+      /><circle
+        cx="78"
+        cy="72"
+        r="26"
+        fill="none"
+        stroke="var(--accent-mid)"
+        stroke-width="3"
+      /></svg>
+      <div
+        class="row"
+        style="position:relative"
+      >
+        <h2
+          class="grow"
+          style="font-size:22px"
+        >
+          {{ cap(monthName(prep.month)) }}
+        </h2>
+        <span class="tag tag--accent tag--lg">{{ published ? 'publicada' : `passo ${nowStep} de 4` }}</span>
+      </div>
+      <ol
+        style="list-style:none;margin:16px 0 0;padding:0"
+      >
+        <li
+          v-for="j in journey"
+          :key="j.n"
+        >
+          <NuxtLink
+            :to="link(`/coordenacao/preparar/${prep.month}?passo=${j.n}`)"
+            class="row"
+            style="flex-wrap:nowrap;align-items:flex-start;gap:14px;padding:12px 0;border-top:1px solid var(--line-2);color:inherit;text-decoration:none"
           >
-            <div class="section-head">
-              <h2>{{ m.monthLabel.charAt(0).toUpperCase() + m.monthLabel.slice(1) }}</h2>
-              <span class="small muted">{{ m.month === currentMonth(tz) ? 'mês corrente' : 'próximo mês' }}</span>
-            </div>
-            <ol class="steps">
-              <li
-                v-for="(s, i) in monthSteps(m, data.counts.qualifiedPeople)"
-                :key="i"
-              >
-                <span
-                  class="steps__mark"
-                  :class="{ 'steps__mark--done': s.done, 'steps__mark--now': s.now }"
-                  :aria-label="s.done ? 'feito' : s.now ? 'próximo passo' : 'a fazer'"
-                >
-                  <Icon
-                    v-if="s.done"
-                    name="check"
-                  />
-                </span>
-                <div class="line">
-                  <span class="line__main">
-                    <span class="line__title">{{ s.title }}</span>
-                    <span
-                      class="line__sub"
-                      style="display:block"
-                    >{{ s.detail }}</span>
-                  </span>
-                  <NuxtLink
-                    v-if="s.action"
-                    :to="s.action.to"
-                    class="btn btn--small"
-                    :class="{ 'btn--primary': s.now }"
-                  >{{ s.action.label }}</NuxtLink>
-                </div>
-              </li>
-            </ol>
-          </section>
-        </div>
-        <aside>
-          <div class="section-head">
-            <h2>Lembrete semanal</h2>
-          </div>
-          <p style="margin-top:.6rem">
-            <template v-if="data.reminder.enabled">
-              Toda <strong>{{ WEEKDAYS[data.reminder.weekday] }}</strong> às <strong>{{ hhmm(data.reminder.time) }}</strong>, cada pessoa escalada recebe as tarefas dos próximos 7 dias.
-            </template>
-            <template v-else>
-              Desligado. Ligue em configurações.
-            </template>
-          </p>
-          <p style="margin-top:.5rem">
-            <NuxtLink :to="link('/coordenacao/mensagens')">Prévia do próximo envio</NuxtLink>
-          </p>
-
-          <div
-            class="section-head"
-            style="margin-top:2rem"
-          >
-            <h2>Pessoas</h2>
-          </div>
-          <div class="figures">
-            <div>
-              <div class="figure__n">
-                {{ data.counts.people }}
-              </div><div class="figure__l">
-                ativas
-              </div>
-            </div>
-            <div>
-              <div class="figure__n">
-                {{ data.counts.withAccount }}
-              </div><div class="figure__l">
-                com acesso
-              </div>
-            </div>
-            <div>
-              <div class="figure__n">
-                {{ data.counts.withConsent }}
-              </div><div class="figure__l">
-                recebem WhatsApp
-              </div>
-            </div>
-          </div>
-
-          <div
-            class="section-head"
-            style="margin-top:2rem"
-          >
-            <h2>Preparação</h2>
             <span
-              v-if="setupPending"
-              class="small muted"
-            >{{ setupPending }} a completar</span>
-          </div>
-          <ol class="steps">
-            <li
-              v-for="(s, i) in setup"
-              :key="i"
-            >
-              <span
-                class="steps__mark"
-                :class="{ 'steps__mark--done': s.done }"
-                :aria-label="s.done ? 'feito' : 'a fazer'"
-              ><Icon
-                v-if="s.done"
-                name="check"
-              /></span>
-              <div>
-                <NuxtLink
-                  v-if="s.action"
-                  :to="s.action.to"
-                  class="line__title"
-                >{{ s.title }}</NuxtLink>
-                <span
-                  class="line__sub"
-                  style="display:block"
-                >{{ s.detail }}</span>
-              </div>
-            </li>
-          </ol>
-        </aside>
-      </div>
-    </template>
-  </div>
+              class="mark"
+              :class="`mark--${j.state}`"
+            ><Icon
+              v-if="j.state === 'done'"
+              name="check"
+              :weight="2.4"
+            /><template v-else>{{ j.n }}</template></span>
+            <span class="grow"><span
+              style="display:block;font-weight:800;font-size:16px"
+              :style="{ color: j.state === 'todo' ? 'var(--muted)' : 'var(--ink)' }"
+            >{{ j.title }}</span><span
+              class="muted small"
+              style="display:block;margin-top:1px"
+            >{{ j.sub }}</span></span>
+            <Icon
+              name="chevron-right"
+              :weight="2"
+              style="width:18px;height:18px;color:var(--muted-2);margin-top:4px"
+            />
+          </NuxtLink>
+        </li>
+      </ol>
+      <NuxtLink
+        :to="ctaTo"
+        class="btn btn--block"
+        style="margin-top:14px"
+      >
+        {{ ctaLabel }}<Icon
+          name="arrow-right"
+          :weight="2.2"
+        />
+      </NuxtLink>
+    </article>
+
+    <div class="grid-auto">
+      <NuxtLink
+        v-if="current"
+        :to="current.schedule.status === 'published' ? link(`/escala/${current.month}`) : link(`/coordenacao/preparar/${current.month}`)"
+        class="card"
+        style="text-decoration:none;color:inherit"
+      >
+        <p
+          class="row"
+          style="gap:6px;font-size:13px;font-weight:800"
+          :style="{ color: current.schedule.status === 'published' ? 'var(--ok)' : 'var(--wait)' }"
+        >
+          <Icon
+            v-if="current.schedule.status === 'published'"
+            name="check"
+            :weight="2.2"
+            style="width:16px;height:16px"
+          />{{ cap(monthName(current.month)) }} {{ current.schedule.status === 'published' ? 'publicado' : 'em rascunho' }}
+        </p>
+        <p style="margin-top:6px;font-weight:800;font-size:17px">
+          {{ current.nextServiceAt ? `Falta ${weekdayLong(current.nextServiceAt, tz).replace('-feira', '')} ${dayNumber(current.nextServiceAt, tz)}` : 'Todos os cultos do mês já passaram' }}
+        </p>
+        <p
+          class="soft small"
+          style="margin-top:2px"
+        >
+          {{ plural(current.scheduledPeople, 'pessoa escalada', 'pessoas escaladas') }} · {{ current.pendingConfirmations ? `${current.pendingConfirmations} ainda não ${current.pendingConfirmations === 1 ? 'confirmou' : 'confirmaram'}` : 'todos confirmaram' }}
+        </p>
+      </NuxtLink>
+      <NuxtLink
+        :to="link('/coordenacao/pessoas')"
+        class="card"
+        style="text-decoration:none;color:inherit"
+      >
+        <p
+          class="muted"
+          style="font-size:13px;font-weight:800"
+        >
+          Pessoas e funções
+        </p>
+        <p style="margin-top:6px;font-weight:800;font-size:17px">
+          {{ plural(data.overview.counts.people, 'pessoa', 'pessoas') }} · {{ plural(data.overview.counts.duties, 'função', 'funções') }}
+        </p>
+        <p
+          class="soft small"
+          style="margin-top:2px"
+        >
+          {{ data.overview.counts.people - data.overview.counts.withAccount ? `${data.overview.counts.people - data.overview.counts.withAccount} ainda sem acesso ao app` : 'Todos já têm acesso ao app' }}
+        </p>
+      </NuxtLink>
+    </div>
+
+    <div
+      v-if="waMode === 'simulation' || waMode === 'disabled'"
+      class="panel panel--wait row"
+      style="gap:12px;border-radius:18px;padding:14px 18px"
+    >
+      <Icon
+        name="info"
+        :weight="2"
+        style="width:22px;height:22px;flex:none;color:var(--wait)"
+      />
+      <p
+        class="grow"
+        style="min-width:220px;font-size:15px"
+      >
+        <strong>{{ waMode === 'simulation' ? 'WhatsApp em modo de teste' : 'WhatsApp desligado' }}</strong> — nada sai de verdade ainda.
+      </p>
+      <NuxtLink
+        :to="link('/coordenacao/whatsapp')"
+        class="btn btn--white btn--sm"
+        style="color:var(--wait-ink)"
+      >
+        Ligar
+      </NuxtLink>
+    </div>
+  </section>
 </template>

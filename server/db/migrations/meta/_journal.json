@@ -15,6 +15,13 @@
       "when": 1790138624974,
       "tag": "0001_ycloud_channel",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790170894675,
+      "tag": "0002_brand_setup",
+      "breakpoints": true
     }
   ]
 }

@@ -1,70 +1,44 @@
 <script setup lang="ts">
-useHead({ title: 'Roteiros' })
+// "Roteiro do culto": abre o roteiro do próximo culto (publicado, para quem só lê).
+useHead({ title: 'Roteiro do culto' })
 const route = useRoute()
-const { capi, tz, link, isCoordinator } = useChurch()
-interface ScriptRow { serviceId: string, title: string, startsAt: string, status: string, script: { status: string, version: number, hasUnpublishedChanges: boolean } | null }
-const month = ref(currentMonth(tz.value))
-const { data } = await useAsyncData(() => `scripts-${route.params.slug}-${month.value}`, () => capi<{ scripts: ScriptRow[] }>(`/scripts?month=${month.value}`), { watch: [month] })
+const { capi, tz, link, isCoordinator, isPastor } = useChurch()
+interface ScriptRow { serviceId: string, title: string, startsAt: string, status: string, script: { version: number } | null }
+const months = [currentMonth(tz.value), shiftMonth(currentMonth(tz.value), 1)]
+const { data } = await useAsyncData(`scripts-next-${route.params.slug}`, async () => {
+  const lists = await Promise.all(months.map((m) => capi<{ scripts: ScriptRow[] }>(`/scripts?month=${m}`)))
+  return lists.flatMap((l) => l.scripts)
+})
+const cutoff = Date.now() - 3 * 3600_000
+const editor = isCoordinator.value || isPastor.value
+const upcoming = computed(() => (data.value ?? []).filter((s) => s.status === 'scheduled' && Date.parse(s.startsAt) >= cutoff))
+const target = computed(() => (editor ? upcoming.value[0] : upcoming.value.find((s) => s.script?.version)) ?? null)
+if (target.value) await navigateTo(link(`/roteiros/${target.value.serviceId}`), { replace: true })
 </script>
 
 <template>
-  <div class="page">
-    <div class="page-head">
-      <p class="kicker">
-        Liturgia
+  <section class="stack-lg">
+    <div>
+      <p class="eyebrow">
+        Roteiro do culto
       </p>
-      <div class="row row--between">
-        <h1>Roteiros</h1>
-        <MonthSwitch v-model="month" />
-      </div>
+      <h1 class="h1--sm">
+        Nenhum roteiro por enquanto
+      </h1>
     </div>
-    <EmptyState
-      v-if="!data?.scripts.length"
-      title="Nenhum culto neste mês"
-    />
-    <ul
-      v-else
-      class="agenda"
-    >
-      <li
-        v-for="s in data.scripts"
-        :key="s.serviceId"
+    <div class="card--dashed">
+      <p
+        class="strong"
+        style="font-size:18px"
       >
-        <DateBlock
-          :at="s.startsAt"
-          :tz="tz"
-        />
-        <div class="line">
-          <span class="line__main">
-            <NuxtLink
-              v-if="s.script?.version"
-              :to="link(`/roteiros/${s.serviceId}`)"
-              class="line__title"
-              style="font-size:1.1rem"
-            >{{ s.title }}</NuxtLink>
-            <span
-              v-else
-              class="line__title"
-              style="font-size:1.1rem"
-            >{{ s.title }}</span>
-            <span
-              class="line__sub"
-              style="display:block"
-            >
-              {{ time(s.startsAt, tz) }} ·
-              <template v-if="s.status === 'cancelled'">cancelado</template>
-              <template v-else-if="s.script?.version">roteiro publicado{{ s.script.hasUnpublishedChanges && isCoordinator ? ' · há alterações não publicadas' : '' }}</template>
-              <template v-else-if="s.script">em preparação</template>
-              <template v-else>sem roteiro</template>
-            </span>
-          </span>
-          <NuxtLink
-            v-if="isCoordinator"
-            class="btn btn--small"
-            :to="link(`/coordenacao/roteiros/${s.serviceId}`)"
-          >{{ s.script ? 'Editar' : 'Montar roteiro' }}</NuxtLink>
-        </div>
-      </li>
-    </ul>
-  </div>
+        O próximo roteiro aparece aqui quando for publicado
+      </p>
+      <p
+        class="soft"
+        style="margin:6px auto 0;max-width:400px"
+      >
+        Quem faz o quê, leituras e músicas do culto.
+      </p>
+    </div>
+  </section>
 </template>

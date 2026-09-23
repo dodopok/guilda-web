@@ -77,7 +77,7 @@ const PEOPLE: { name: string, roles: Role[], duties: string[], account: boolean,
 
 async function makeChurch(slug: string, name: string, peopleDefs: typeof PEOPLE, phoneBase: number) {
   const [church] = await db.insert(churches).values({
-    slug, name, timezone: tz, defaultLocation: 'Salão principal', reminderEnabled: true, reminderWeekday: 4, reminderTime: '19:00',
+    slug, name, timezone: tz, defaultLocation: 'Salão principal', reminderEnabled: true, reminderWeekday: 4, reminderTime: '19:00', setupCompletedAt: new Date(),
   }).returning()
   await db.insert(whatsappChannels).values({ churchId: church!.id, mode: 'simulation' })
   const ministryId: Record<string, string> = {}

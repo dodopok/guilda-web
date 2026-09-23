@@ -28,6 +28,8 @@ export interface Church {
   confirmationDeadlineHours: number
   liturgicalPrayerBook: string
   liturgicalReadingType: string
+  accentColor: string
+  setupCompleted: boolean
 }
 
 export interface ChurchInfo {
@@ -35,6 +37,8 @@ export interface ChurchInfo {
   me: { personId: string, roles: string[] }
   liturgicalColor: string | null
   whatsappMode: 'disabled' | 'simulation' | 'cloud_api' | 'ycloud' | null
+  logoVersion: number | null
+  attention: number
 }
 
 export interface Task {
@@ -55,6 +59,8 @@ export interface HomeResponse {
   availability: { month: string, monthLabel: string, deadlineAt: string, responded: boolean, respondedAt: string | null }[]
   nextScript: { serviceId: string, title: string, startsAt: string, color: string | null } | null
   isCoordinator: boolean
+  serviceLiturgy: Record<string, { color: string | null, season: string | null, sundayName: string | null }>
+  nextMonth: { month: string, monthLabel: string, published: boolean, hasServices: boolean }
 }
 
 export interface Swap {
@@ -164,7 +170,7 @@ export interface ScheduleEditor {
   version: number
   publishedAt: string | null
   services: EditorService[]
-  duties: { id: string, name: string, ministryId: string, kind: string, active: boolean }[]
+  duties: { id: string, name: string, ministryId: string, kind: string, active: boolean, arrivalMinutesBefore: number | null }[]
   ministries: { id: string, name: string }[]
   people: { id: string, displayName: string, roles: string[], dutyIds: string[] }[]
   alerts: Alert[]
@@ -200,14 +206,19 @@ export interface ScriptBlock {
   textSource: string
   dutyId: string | null
   personId: string | null
-  data: {
-    reference?: string
-    source?: 'estevao' | 'manual'
-    songIds?: string[]
-    items?: { text: string, ownerPersonId?: string | null, status?: 'draft' | 'ready' }[]
-  }
+  data: BlockData
   responsibles: { personId: string, name: string, status: string, scheduled: boolean }[]
   songs: Song[]
+  readerNotified?: boolean
+}
+
+export interface BlockData {
+  reference?: string
+  alternatives?: string[]
+  source?: 'estevao' | 'manual'
+  songIds?: string[]
+  items?: { text: string, ownerPersonId?: string | null, status?: 'draft' | 'ready', fixed?: boolean }[]
+  templateBody?: string | null
 }
 
 export interface Song { id: string, title: string, author: string | null, musicalKey: string | null, link: string | null, notes: string | null }
@@ -235,6 +246,7 @@ export interface PublishedContent {
 export interface ScriptView {
   service: { id: string, title: string, startsAt: string, localDate: string, time: string, location: string | null, kind: string, status: string }
   canEdit: boolean
+  canPublish?: boolean
   canChooseMusic: boolean
   published: { version: number, publishedAt: string, content: PublishedContent } | null
   draft: null | {
@@ -273,12 +285,7 @@ export interface EditableBlock {
   textSource: string
   dutyId: string | null
   personId: string | null
-  data: {
-    reference?: string
-    source?: 'estevao' | 'manual'
-    songIds?: string[]
-    items?: { text: string, ownerPersonId?: string | null, status?: 'draft' | 'ready' }[]
-  }
+  data: BlockData
   responsibles?: { name: string, status: string }[]
   songs?: { title: string }[]
 }
