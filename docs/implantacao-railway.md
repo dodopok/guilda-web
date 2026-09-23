@@ -27,7 +27,7 @@ O script:
    - `SECRETS_ENCRYPTION_KEY`, gerada na hora (só se ainda não existir; trocar depois invalida as chaves do WhatsApp salvas);
    - `ESTEVAO_API_KEY`, se você informar;
    - `BOOTSTRAP_ADMIN_PHONE`, `BOOTSTRAP_ADMIN_NAME` e `BOOTSTRAP_ADMIN_PASSWORD` para a primeira administração.
-4. Gera o domínio `*.up.railway.app` do web e reimplanta web e worker.
+4. Gera o domínio `*.up.railway.app` do web na **porta 3000** (a aplicação escuta nela; `PORT=3000` está no arquivo) e reimplanta web e worker.
 
 Rodar de novo é seguro: não recria nada que já existe e não troca segredos definidos.
 

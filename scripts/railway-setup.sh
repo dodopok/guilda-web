@@ -46,7 +46,7 @@ echo "== 4/4 Domínio público do web"
 if railway domain list --service web 2>/dev/null | grep -q "up.railway.app"; then
   railway domain list --service web
 else
-  railway domain --service web
+  railway domain --service web --port 3000
 fi
 
 # Uma única implantação com tudo definido.
