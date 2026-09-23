@@ -1,12 +1,15 @@
 <script setup lang="ts">
 useHead({ title: 'Canal do WhatsApp' })
 const route = useRoute()
-const { capi, tz, info } = useChurch()
+const { capi, tz, info, link } = useChurch()
 const toast = useToast()
 
+type Mode = 'disabled' | 'simulation' | 'cloud_api' | 'ycloud'
 interface TemplateRow { kind: string, label: string, defaultName: string, body: string, params: string[], name: string, language: string, status: string }
 interface Channel {
-  mode: 'disabled' | 'simulation' | 'cloud_api' | 'ycloud'
+  mode: Mode
+  lastWebhookAt: string | null
+  consents: { people: number, granted: number }
   phoneNumberId: string | null
   senderPhone: string | null
   businessAccountId: string | null
@@ -23,420 +26,529 @@ interface Channel {
 }
 const { data, refresh } = await useAsyncData(`wa-${route.params.slug}`, () => capi<Channel>('/whatsapp'))
 
-const form = reactive({ phoneNumberId: '', senderPhone: '', businessAccountId: '', displayPhoneLast4: '', accessToken: '', appSecret: '', webhookVerifyToken: '', testMode: true, testRecipients: '' })
-watchEffect(() => {
-  const c = data.value
-  if (!c) return
-  Object.assign(form, { phoneNumberId: c.phoneNumberId ?? '', senderPhone: c.senderPhone ?? '', businessAccountId: c.businessAccountId ?? '', displayPhoneLast4: c.displayPhoneLast4 ?? '', testMode: c.testMode, testRecipients: c.testRecipients.join('\n'), accessToken: '', appSecret: '', webhookVerifyToken: '' })
+const form = reactive({ mode: 'disabled' as Mode, number: '', businessAccountId: '', displayPhoneLast4: '', accessToken: '', appSecret: '', webhookVerifyToken: '', testMode: true, testRecipients: [] as string[] })
+const newNumber = ref('')
+function load(c: Channel) {
+  Object.assign(form, {
+    mode: c.mode,
+    number: (c.mode === 'cloud_api' ? c.phoneNumberId : c.senderPhone) ?? '',
+    businessAccountId: c.businessAccountId ?? '',
+    displayPhoneLast4: c.displayPhoneLast4 ?? '',
+    testMode: c.testMode,
+    testRecipients: [...c.testRecipients],
+    accessToken: '',
+    appSecret: '',
+    webhookVerifyToken: '',
+  })
+}
+watch(data, (c) => c && load(c), { immediate: true })
+
+const official = computed(() => form.mode === 'ycloud' || form.mode === 'cloud_api')
+const meta = computed(() => form.mode === 'cloud_api')
+const MODES: { id: Mode, label: string, sub: string }[] = [
+  { id: 'disabled', label: 'Desligado', sub: 'Nada sai. Só o app.' },
+  { id: 'simulation', label: 'Simulação', sub: 'Fica registrado, nada sai.' },
+  { id: 'ycloud', label: 'Oficial via YCloud', sub: 'Número da igreja pela YCloud.' },
+  { id: 'cloud_api', label: 'Oficial direto com a Meta', sub: 'Sua própria conta na Meta.' },
+]
+const headline = computed(() => {
+  if (form.mode === 'disabled') return { t: 'WhatsApp desligado', s: 'Ninguém recebe mensagem; as pessoas veem tudo só no app.' }
+  if (form.mode === 'simulation') return { t: 'Modo de simulação', s: 'Nada sai de verdade. Cada mensagem fica em Mensagens enviadas para você conferir.' }
+  if (!data.value?.readiness.canSendReal) return { t: 'Oficial, ainda sem enviar', s: 'Enquanto a lista abaixo não estiver completa, nada sai de verdade.' }
+  return form.testMode ? { t: 'Oficial, em modo de teste', s: 'Só os números de teste recebem.' } : { t: 'Oficial, enviando de verdade', s: 'Todo mundo que autorizou recebe.' }
 })
-async function patch(body: Record<string, unknown>, msg = 'Configuração salva.') {
+
+const webhookUrl = computed(() => {
+  const path = `/api/v1/webhooks/${meta.value ? 'whatsapp' : 'ycloud'}`
+  return import.meta.client ? `${window.location.origin}${path}` : path
+})
+async function copy(text: string) {
   try {
-    await capi('/whatsapp', { method: 'PATCH', body })
-    toast.ok(msg)
+    await navigator.clipboard.writeText(text)
+    toast.ok('Copiado.')
+  } catch {
+    toast.error('Não consegui copiar. Selecione e copie à mão.')
+  }
+}
+function addNumber() {
+  const v = newNumber.value.trim()
+  if (!v) return
+  if (!form.testRecipients.includes(v)) form.testRecipients.push(v)
+  newNumber.value = ''
+}
+
+const TSTATUS: Record<string, { label: string, bg: string, fg: string }> = {
+  approved: { label: 'aprovado', bg: '#e3f3e8', fg: '#155f30' },
+  pending: { label: 'em análise', bg: '#fff1d6', fg: '#a86400' },
+  rejected: { label: 'rejeitado', bg: '#fde4e0', fg: '#8f2a1e' },
+  not_submitted: { label: 'rascunho', bg: '#f0efe9', fg: '#4a5450' },
+}
+const openTpl = ref<string | null>(null)
+const tplStatus = reactive<Record<string, string>>({})
+watch(data, (c) => c?.templates.forEach((t) => (tplStatus[t.kind] = t.status)), { immediate: true })
+const approved = computed(() => Object.values(tplStatus).filter((s) => s === 'approved').length)
+
+const checklist = computed(() => {
+  const c = data.value
+  if (!c) return []
+  const total = c.templates.length
+  return [
+    { label: 'Número verificado', sub: official.value ? (c.readiness.hasCredentials ? 'Número e chave cadastrados' : 'Cadastre o número e a chave acima') : 'Escolha um modo oficial', done: official.value && c.readiness.hasCredentials },
+    { label: 'Modelos aprovados', sub: `${approved.value} de ${total} aprovados pela Meta`, done: approved.value === total },
+    { label: 'Webhook respondendo', sub: !official.value ? 'Precisa de um modo oficial' : c.lastWebhookAt ? `Último sinal: ${stamp(c.lastWebhookAt, tz.value)}` : c.readiness.hasWebhookSecret ? 'Nenhum sinal recebido ainda' : 'Cadastre o segredo do webhook', done: official.value && c.readiness.hasWebhookSecret && Boolean(c.lastWebhookAt) },
+    { label: 'Coexistência comprovada', sub: c.readiness.coexistenceVerified ? 'Registrado abaixo' : 'Registre abaixo como foi testado', done: c.readiness.coexistenceVerified },
+    { label: 'Autorizações registradas', sub: `${c.consents.granted} de ${c.consents.people} pessoas autorizaram`, done: c.consents.people > 0 && c.consents.granted === c.consents.people, action: 'Ver pessoas', to: link('/coordenacao/pessoas') },
+  ]
+})
+const doneCount = computed(() => checklist.value.filter((c) => c.done).length)
+
+const coexNote = ref('')
+watch(data, (c) => (coexNote.value = c?.coexistence.note ?? ''), { immediate: true })
+const coexOk = computed(() => data.value?.coexistence.status === 'verified')
+async function toggleCoex(v: boolean) {
+  if (v && !coexNote.value.trim()) {
+    toast.error('Conte antes como testaram: quem mandou, de onde, e se o aparelho continuou recebendo.')
+    return
+  }
+  try {
+    await capi('/whatsapp/coexistence', { method: 'PUT', body: { status: v ? 'verified' : 'not_verified', note: coexNote.value } })
+    toast.ok(v ? 'Coexistência registrada.' : 'Registro desfeito.')
     await refresh()
-    if (info.value && 'mode' in body) info.value.whatsappMode = body.mode as Channel['mode']
   } catch (e) {
     toast.error(e)
   }
 }
-// O formulário de credenciais segue o provedor escolhido; sem provedor real, mostra o YCloud.
-const provider = computed<'ycloud' | 'cloud_api'>(() => (data.value?.mode === 'cloud_api' ? 'cloud_api' : 'ycloud'))
-async function saveCredentials() {
-  const body: Record<string, unknown> = provider.value === 'ycloud'
-    ? { senderPhone: form.senderPhone || null }
-    : { phoneNumberId: form.phoneNumberId || null, businessAccountId: form.businessAccountId || null, displayPhoneLast4: form.displayPhoneLast4 || null }
-  Object.assign(body, {
-    testMode: form.testMode,
-    testRecipients: form.testRecipients.split(/[\n,]/).map((x) => x.trim()).filter(Boolean),
-  })
+
+const saving = ref(false)
+async function save() {
+  const c = data.value
+  if (!c) return
+  const body: Record<string, unknown> = { mode: form.mode, testMode: form.testMode, testRecipients: form.testRecipients }
+  if (form.mode === 'ycloud') body.senderPhone = form.number || null
+  if (form.mode === 'cloud_api') Object.assign(body, { phoneNumberId: form.number || null, businessAccountId: form.businessAccountId || null, displayPhoneLast4: form.displayPhoneLast4 || null })
   if (form.accessToken) body.accessToken = form.accessToken
   if (form.appSecret) body.appSecret = form.appSecret
   if (form.webhookVerifyToken) body.webhookVerifyToken = form.webhookVerifyToken
-  await patch(body, 'Credenciais salvas (cifradas no servidor).')
-}
-const coex = reactive({ note: '' })
-async function setCoex(status: 'verified' | 'not_verified') {
+  const changed = c.templates.filter((t) => tplStatus[t.kind] !== t.status)
+  if (changed.length) body.templates = Object.fromEntries(changed.map((t) => [t.kind, { name: t.name, language: t.language, status: tplStatus[t.kind] }]))
+  saving.value = true
   try {
-    await capi('/whatsapp/coexistence', { method: 'PUT', body: { status, note: coex.note } })
-    toast.ok(status === 'verified' ? 'Comprovação registrada.' : 'Comprovação desfeita.')
-    coex.note = ''
+    await capi('/whatsapp', { method: 'PATCH', body })
+    toast.ok(form.accessToken || form.appSecret ? 'Salvo. As chaves ficam cifradas no servidor.' : 'Salvo.')
+    if (info.value) info.value.whatsappMode = form.mode
     await refresh()
   } catch (e) {
     toast.error(e)
+  } finally {
+    saving.value = false
   }
 }
-async function setTemplate(t: TemplateRow, patchT: Partial<TemplateRow>) {
-  await patch({ templates: { [t.kind]: { name: patchT.name ?? t.name, language: patchT.language ?? t.language, status: patchT.status ?? (t.status === 'not_submitted' ? 'not_submitted' : t.status) } } }, 'Modelo atualizado.')
-}
-const webhookUrl = computed(() => {
-  const path = `/api/v1/webhooks/${provider.value === 'ycloud' ? 'ycloud' : 'whatsapp'}`
-  return import.meta.client ? `${window.location.origin}${path}` : path
-})
-const checks = computed(() => {
-  const c = data.value
-  if (!c) return []
-  const y = provider.value === 'ycloud'
-  return [
-    { ok: c.mode === 'cloud_api' || c.mode === 'ycloud', text: 'Canal oficial escolhido para esta igreja (YCloud ou Cloud API)' },
-    { ok: c.readiness.hasCredentials, text: y ? 'Número da igreja e chave de API do YCloud cadastrados' : 'Identificador do número e token de acesso cadastrados' },
-    { ok: c.readiness.hasWebhookSecret, text: y ? 'Segredo do webhook do YCloud cadastrado (confere a assinatura dos eventos)' : 'App secret cadastrado (confere a assinatura dos webhooks)' },
-    { ok: c.readiness.coexistenceVerified, text: 'Coexistência comprovada: o número continua funcionando no aplicativo WhatsApp Business' },
-    { ok: c.readiness.approvedTemplates.includes('weekly_reminder'), text: 'Modelo do lembrete semanal aprovado na Meta' },
-    { ok: c.readiness.realSendAllowedByServer, text: 'Envio real liberado no servidor (WHATSAPP_ALLOW_REAL_SEND=true)' },
-  ]
-})
-async function copy(text: string) {
-  await navigator.clipboard?.writeText(text)
-  toast.ok('Copiado.')
-}
-function varList(params: string[]) {
-  return params.map((p, i) => `${'{'.repeat(2)}${i + 1}${'}'.repeat(2)} ${p}`).join(' · ')
-}
-const TSTATUS: Record<string, string> = { not_submitted: 'Não enviado', pending: 'Em análise', approved: 'Aprovado', rejected: 'Rejeitado' }
 </script>
 
 <template>
-  <div class="page page--wide">
-    <NuxtLink
-      :to="`/i/${$route.params.slug}/coordenacao/configuracoes`"
-      class="back"
-    >
-      <Icon
-        name="arrow-left"
-        :weight="2"
-      />Configurações
-    </NuxtLink>
-    <div class="page-head">
-      <p class="kicker">
-        Comunicação
-      </p>
-      <h1>Canal do WhatsApp</h1>
-      <p class="lede">
-        Cada igreja usa o próprio número. Mensagens só saem para quem autorizou, e o envio real só liga depois de comprovar que o número continua no aplicativo WhatsApp Business.
-      </p>
-    </div>
+  <div class="stack-lg w-760">
+    <PageHead
+      title="Canal do WhatsApp"
+      lede="Por onde as mensagens da igreja saem."
+      :back="link('/coordenacao/configuracoes')"
+      back-label="Configurações"
+    />
     <template v-if="data">
-      <section>
-        <div class="section-head">
-          <h2>Modo</h2>
-        </div>
-        <fieldset style="margin-top:.5rem">
-          <legend class="sr-only">
-            Modo do canal
-          </legend>
-          <div class="choice-list">
-            <label class="check"><input
-              type="radio"
-              name="mode"
-              :checked="data.mode === 'disabled'"
-              @change="patch({ mode: 'disabled' })"
-            ><span class="check__text"><strong>Desativado</strong><span
-              class="small muted"
-              style="display:block"
-            >Nada é enviado. Mensagens ficam registradas como “não enviadas”.</span></span></label>
-            <label class="check"><input
-              type="radio"
-              name="mode"
-              :checked="data.mode === 'simulation'"
-              @change="patch({ mode: 'simulation' })"
-            ><span class="check__text"><strong>Simulação local</strong> <span class="tag tag--sim">não envia</span><span
-              class="small muted"
-              style="display:block"
-            >Para testes: o fluxo inteiro roda e as mensagens aparecem como simuladas. Ninguém recebe nada.</span></span></label>
-            <label class="check"><input
-              type="radio"
-              name="mode"
-              :checked="data.mode === 'ycloud'"
-              @change="patch({ mode: 'ycloud' })"
-            ><span class="check__text"><strong>Canal oficial pelo YCloud</strong><span
-              class="small muted"
-              style="display:block"
-            >Número conectado no YCloud por coexistência. Envio real só quando todos os itens ao lado estiverem cumpridos.</span></span></label>
-            <label class="check"><input
-              type="radio"
-              name="mode"
-              :checked="data.mode === 'cloud_api'"
-              @change="patch({ mode: 'cloud_api' })"
-            ><span class="check__text"><strong>Canal oficial direto na Meta (Cloud API)</strong><span
-              class="small muted"
-              style="display:block"
-            >Para quem tem app próprio na Meta. Mesmas exigências para o envio real.</span></span></label>
-          </div>
-        </fieldset>
-      </section>
+      <div class="panel--accent">
+        <p
+          class="caps"
+          style="color:inherit;opacity:.85;font-size:12px"
+        >
+          Agora
+        </p>
+        <h2 style="font-size:22px;margin-top:2px">
+          {{ headline.t }}
+        </h2>
+        <p style="margin-top:6px;opacity:.92;font-size:15px">
+          {{ headline.s }}
+        </p>
+      </div>
 
-      <div class="split section">
-        <div>
-          <section>
-            <div class="section-head">
-              <h2>Credenciais</h2>
-            </div>
-            <p
-              v-if="!data.encryptionReady"
-              class="notice notice--no"
-              style="margin-top:.75rem"
-            >
-              O servidor está sem SECRETS_ENCRYPTION_KEY: não é possível guardar tokens.
-            </p>
-            <form
-              style="margin-top:1rem"
-              @submit.prevent="saveCredentials"
-            >
-              <template v-if="provider === 'ycloud'">
-                <label class="field"><span class="field__label">Número da igreja no WhatsApp</span><input
-                  v-model="form.senderPhone"
-                  class="input"
-                  type="tel"
-                  autocomplete="off"
-                  placeholder="+55 51 99999-9999"
-                ><span class="field__hint">O mesmo número conectado no YCloud. As mensagens saem dele.</span></label>
-                <label class="field"><span class="field__label">Chave de API do YCloud</span><input
-                  v-model="form.accessToken"
-                  class="input"
-                  type="password"
-                  autocomplete="off"
-                  :placeholder="data.hasAccessToken ? 'Guardada — preencha só para trocar' : 'Em Developers → API Keys, no painel do YCloud'"
-                ></label>
-                <label class="field"><span class="field__label">Segredo do webhook</span><input
-                  v-model="form.appSecret"
-                  class="input"
-                  type="password"
-                  autocomplete="off"
-                  :placeholder="data.hasAppSecret ? 'Guardado — preencha só para trocar' : 'Mostrado ao criar o endpoint de webhook no YCloud'"
-                ></label>
-                <p class="field__hint">
-                  URL do webhook para cadastrar no YCloud (eventos <code>whatsapp.message.updated</code> e <code>whatsapp.inbound_message.received</code>): <code>{{ webhookUrl }}</code> <button
-                    type="button"
-                    class="btn btn--quiet btn--small"
-                    @click="copy(webhookUrl)"
-                  >
-                    Copiar
-                  </button>
-                </p>
-              </template>
-              <template v-else>
-                <div class="fields-2">
-                  <label class="field"><span class="field__label">Phone number ID</span><input
-                    v-model="form.phoneNumberId"
-                    class="input"
-                    inputmode="numeric"
-                    autocomplete="off"
-                  ></label>
-                  <label class="field"><span class="field__label">WhatsApp Business Account ID</span><input
-                    v-model="form.businessAccountId"
-                    class="input"
-                    inputmode="numeric"
-                    autocomplete="off"
-                  ></label>
-                </div>
-                <label class="field"><span class="field__label">Últimos 4 dígitos do número (para exibição)</span><input
-                  v-model="form.displayPhoneLast4"
-                  class="input"
-                  style="max-width:8rem"
-                  inputmode="numeric"
-                  maxlength="4"
-                ></label>
-                <label class="field"><span class="field__label">Token de acesso</span><input
-                  v-model="form.accessToken"
-                  class="input"
-                  type="password"
-                  autocomplete="off"
-                  :placeholder="data.hasAccessToken ? 'Guardado — preencha só para trocar' : 'Cole o token do usuário do sistema'"
-                ></label>
-                <label class="field"><span class="field__label">App secret</span><input
-                  v-model="form.appSecret"
-                  class="input"
-                  type="password"
-                  autocomplete="off"
-                  :placeholder="data.hasAppSecret ? 'Guardado — preencha só para trocar' : ''"
-                ></label>
-                <label class="field"><span class="field__label">Token de verificação do webhook</span><input
-                  v-model="form.webhookVerifyToken"
-                  class="input"
-                  type="password"
-                  autocomplete="off"
-                  :placeholder="data.hasWebhookVerifyToken ? 'Guardado — preencha só para trocar' : 'Invente um texto longo e use o mesmo na Meta'"
-                ></label>
-                <p class="field__hint">
-                  URL do webhook para cadastrar na Meta: <code>{{ webhookUrl }}</code> <button
-                    type="button"
-                    class="btn btn--quiet btn--small"
-                    @click="copy(webhookUrl)"
-                  >
-                    Copiar
-                  </button>
-                </p>
-              </template>
-              <label
-                class="check"
-                style="margin-top:1rem"
-              ><input
-                v-model="form.testMode"
-                type="checkbox"
-              ><span class="check__text"><strong>Modo de teste</strong><span
-                class="small muted"
-                style="display:block"
-              >Envio real só para os números abaixo, um por linha.</span></span></label>
-              <textarea
-                v-if="form.testMode"
-                v-model="form.testRecipients"
-                class="textarea"
-                style="min-height:4rem"
-                aria-label="Números de teste"
-                placeholder="+55 51 99999-9999"
-              />
-              <button
-                class="btn btn--primary"
-                style="margin-top:1rem"
-              >
-                Salvar credenciais
-              </button>
-              <p
-                class="small muted"
-                style="margin-top:.5rem"
-              >
-                Tokens ficam cifrados no banco e nunca voltam para o navegador.
-              </p>
-            </form>
-          </section>
-
-          <section class="section">
-            <div class="section-head">
-              <h2>Modelos de mensagem</h2>
-            </div>
-            <p
-              class="ink-2"
-              style="margin-top:.75rem"
-            >
-              Cadastre estes textos como modelos da categoria “utilidade”, em português ({{ provider === 'ycloud' ? 'no YCloud, em WhatsApp → Templates' : 'no gerenciador da Meta' }}), com o mesmo nome, e marque aqui quando forem aprovados.
-            </p>
-            <ul
-              class="lines"
-              style="margin-top:1rem"
-            >
-              <li
-                v-for="t in data.templates"
-                :key="t.kind"
-              >
-                <div class="line">
-                  <span class="line__main"><span class="line__title">{{ t.label }}</span> <code class="small">{{ t.name }}</code></span>
-                  <label
-                    class="sr-only"
-                    :for="`ts-${t.kind}`"
-                  >Situação de {{ t.label }}</label>
-                  <select
-                    :id="`ts-${t.kind}`"
-                    class="select"
-                    style="width:auto;min-height:2.25rem;padding:.2rem .5rem"
-                    :value="t.status"
-                    @change="setTemplate(t, { status: ($event.target as HTMLSelectElement).value })"
-                  >
-                    <option
-                      v-for="(l, k) in TSTATUS"
-                      :key="k"
-                      :value="k"
-                    >
-                      {{ l }}
-                    </option>
-                  </select>
-                </div>
-                <p
-                  class="small ink-2"
-                  style="margin-top:.35rem"
-                >
-                  {{ t.body }}
-                </p>
-                <p class="small muted">
-                  Variáveis: {{ varList(t.params) }} <button
-                    type="button"
-                    class="btn btn--quiet btn--small"
-                    @click="copy(t.body)"
-                  >
-                    Copiar texto
-                  </button>
-                </p>
-              </li>
-            </ul>
-          </section>
-        </div>
-
-        <aside>
-          <div class="section-head">
-            <h2>Para enviar de verdade</h2>
-          </div>
-          <ol class="steps">
-            <li
-              v-for="(c, i) in checks"
-              :key="i"
-            >
-              <span
-                class="steps__mark"
-                :class="{ 'steps__mark--done': c.ok }"
-                :aria-label="c.ok ? 'cumprido' : 'pendente'"
-              ><Icon
-                v-if="c.ok"
-                name="check"
-              /></span>
-              <span class="small">{{ c.text }}</span>
-            </li>
-          </ol>
-          <p
-            class="notice"
-            :class="data.readiness.canSendReal ? 'notice--ok' : 'notice--wait'"
-            style="margin-top:1rem"
+      <div class="card">
+        <h2
+          id="wa-mode"
+          style="font-size:18px;margin-bottom:10px"
+        >
+          Modo
+        </h2>
+        <div
+          class="modegrid"
+          role="radiogroup"
+          aria-labelledby="wa-mode"
+        >
+          <button
+            v-for="m in MODES"
+            :key="m.id"
+            type="button"
+            role="radio"
+            class="modecard"
+            :aria-checked="form.mode === m.id"
+            @click="form.mode = m.id"
           >
-            {{ data.readiness.canSendReal ? (data.testMode ? 'Pronto para envio real, só para os números de teste.' : 'Envio real ligado para quem autorizou.') : 'Envio real bloqueado até completar a lista.' }}
-          </p>
+            <span class="modecard__t">{{ m.label }}</span>
+            <span class="modecard__s">{{ m.sub }}</span>
+          </button>
+        </div>
+      </div>
 
+      <div
+        v-if="official"
+        class="card stack-md"
+      >
+        <h2 style="font-size:18px">
+          {{ meta ? 'Conta na Meta' : 'Conta na YCloud' }}
+        </h2>
+        <p
+          v-if="!data.encryptionReady"
+          class="panel panel--no small"
+        >
+          O servidor está sem SECRETS_ENCRYPTION_KEY: não dá para guardar chaves ainda.
+        </p>
+        <label class="field">
+          <span class="field__label">{{ meta ? 'Identificador do número (Phone number ID)' : 'Número da igreja' }}</span>
+          <input
+            v-model="form.number"
+            class="input"
+            :type="meta ? 'text' : 'tel'"
+            :inputmode="meta ? 'numeric' : 'tel'"
+            autocomplete="off"
+            :placeholder="meta ? 'Somente números' : '+55 51 9 0000-0000'"
+          >
+        </label>
+        <div class="fields-2">
+          <label class="field">
+            <span class="field__label">{{ meta ? 'Token de acesso' : 'Chave da API' }}</span>
+            <input
+              v-model="form.accessToken"
+              class="input"
+              type="password"
+              autocomplete="off"
+              :placeholder="data.hasAccessToken ? 'guardada — só para trocar' : 'cole aqui'"
+            >
+          </label>
+          <label class="field">
+            <span class="field__label">Segredo do webhook</span>
+            <input
+              v-model="form.appSecret"
+              class="input"
+              type="password"
+              autocomplete="off"
+              :placeholder="data.hasAppSecret ? 'guardado — só para trocar' : 'cole aqui'"
+            >
+          </label>
+        </div>
+        <details v-if="meta">
+          <summary class="link">
+            Mais campos da Meta
+          </summary>
           <div
-            class="section-head"
-            style="margin-top:2rem"
+            class="fields-2"
+            style="margin-top:8px"
           >
-            <h2>Coexistência</h2>
+            <label class="field"><span class="field__label">WhatsApp Business Account ID</span><input
+              v-model="form.businessAccountId"
+              class="input"
+              inputmode="numeric"
+              autocomplete="off"
+            ></label>
+            <label class="field"><span class="field__label">Final do número (4 dígitos)</span><input
+              v-model="form.displayPhoneLast4"
+              class="input"
+              inputmode="numeric"
+              maxlength="4"
+            ></label>
           </div>
-          <p
-            class="small"
-            style="margin-top:.6rem"
-          >
-            O número atual precisa continuar funcionando no aplicativo WhatsApp Business. Isso exige a conexão por coexistência (no YCloud, “conectar número já usado no aplicativo WhatsApp Business”). Não conecte o número de outra forma: a migração comum desativa o aplicativo. Antes de registrar, envie uma mensagem de teste e confirme que o aplicativo continua recebendo e enviando no mesmo número.
-          </p>
-          <p
-            v-if="data.coexistence.status === 'verified'"
-            class="notice notice--ok small"
-            style="margin-top:.75rem"
-          >
-            Comprovada em {{ dateTime(data.coexistence.verifiedAt!, tz) }}: {{ data.coexistence.note }}
-          </p>
           <label
             class="field"
-            style="margin-top:.75rem"
-          ><span class="field__label">Como foi comprovado</span><textarea
-            v-model="coex.note"
-            class="textarea"
-            style="min-height:4.5rem"
-            placeholder="Ex.: em 12/10, após conectar por coexistência, enviamos uma mensagem de teste pela Guilda e respondemos pelo aplicativo no mesmo número."
-          /></label>
-          <div class="row">
+            style="margin-top:12px"
+          ><span class="field__label">Token de verificação do webhook</span><input
+            v-model="form.webhookVerifyToken"
+            class="input"
+            type="password"
+            autocomplete="off"
+            :placeholder="data.hasWebhookVerifyToken ? 'guardado — só para trocar' : 'invente um texto longo e use o mesmo na Meta'"
+          ></label>
+        </details>
+        <div>
+          <span class="field__label">Endereço do webhook — cole no painel {{ meta ? 'da Meta' : 'da YCloud' }}</span>
+          <div
+            class="row"
+            style="gap:8px"
+          >
+            <code
+              class="mono"
+              style="flex:1;min-width:200px;padding:12px 14px;border-radius:12px;background:var(--surface-2);word-break:break-all"
+            >{{ webhookUrl }}</code>
             <button
-              v-if="data.coexistence.status !== 'verified'"
               type="button"
-              class="btn btn--small"
-              :disabled="coex.note.trim().length < 10"
-              @click="setCoex('verified')"
+              class="btn btn--secondary btn--sm"
+              style="min-height:44px"
+              @click="copy(webhookUrl)"
             >
-              Registrar comprovação
-            </button>
-            <button
-              v-else
-              type="button"
-              class="btn btn--small btn--no"
-              :disabled="coex.note.trim().length < 10"
-              @click="setCoex('not_verified')"
-            >
-              Desfazer comprovação
+              Copiar
             </button>
           </div>
-        </aside>
+          <p
+            v-if="!meta"
+            class="field__hint"
+          >
+            Eventos: whatsapp.message.updated e whatsapp.inbound_message.received.
+          </p>
+        </div>
+        <SwitchRow
+          v-model="form.testMode"
+          title="Modo de teste"
+          sub="Só os números abaixo recebem."
+          boxed
+        />
+        <div
+          v-if="form.testMode"
+          class="row"
+          style="gap:6px"
+        >
+          <span
+            v-for="(n, i) in form.testRecipients"
+            :key="n"
+            class="row"
+            style="gap:6px;padding:5px 5px 5px 12px;border-radius:999px;background:var(--surface-4);font-weight:700;font-size:13.5px"
+          >{{ n }}<button
+            type="button"
+            class="icon-btn icon-btn--round icon-btn--sm"
+            style="width:24px;height:24px;background:#fff"
+            :aria-label="`Tirar ${n}`"
+            @click="form.testRecipients.splice(i, 1)"
+          ><Icon
+            name="x"
+            :weight="2.4"
+          /></button></span>
+          <input
+            v-model="newNumber"
+            class="input"
+            style="width:auto;flex:1 1 150px;min-height:40px;padding:8px 12px;font-size:14.5px"
+            type="tel"
+            placeholder="+55 51 9…"
+            aria-label="Novo número de teste"
+            @keydown.enter.prevent="addNumber"
+          >
+          <button
+            type="button"
+            class="btn btn--line btn--xs"
+            style="min-height:40px"
+            @click="addNumber"
+          >
+            Adicionar
+          </button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div
+          class="row"
+          style="gap:10px"
+        >
+          <h2 style="font-size:18px;flex:1">
+            Para enviar de verdade
+          </h2>
+          <span
+            class="stag"
+            :style="doneCount === checklist.length ? { background: '#e3f3e8', color: '#155f30' } : { background: '#fff1d6', color: '#a86400' }"
+          >{{ doneCount === checklist.length ? 'pronto para ligar' : `${doneCount} de ${checklist.length}` }}</span>
+        </div>
+        <ul
+          style="list-style:none;margin:8px 0 0;padding:0"
+        >
+          <li
+            v-for="c in checklist"
+            :key="c.label"
+            class="row"
+            style="gap:12px;padding:10px 0;border-top:1px solid var(--line-2)"
+          >
+            <span
+              v-if="c.done"
+              style="width:26px;height:26px;border-radius:999px;background:var(--ok);color:#fff;display:grid;place-items:center;flex:none"
+            ><Icon
+              name="check"
+              :weight="2.6"
+              style="width:14px;height:14px"
+              label="feito"
+            /></span>
+            <span
+              v-else
+              style="width:26px;height:26px;border-radius:999px;border:2px solid var(--field);flex:none"
+            ><span class="sr-only">pendente</span></span>
+            <span style="flex:1;min-width:180px">
+              <span
+                class="strong"
+                style="display:block;font-weight:700"
+              >{{ c.label }}</span>
+              <span
+                class="muted"
+                style="display:block;font-size:13.5px"
+              >{{ c.sub }}</span>
+            </span>
+            <NuxtLink
+              v-if="c.action"
+              :to="c.to!"
+              class="link"
+              style="font-size:13.5px"
+            >{{ c.action }}</NuxtLink>
+          </li>
+        </ul>
+        <p
+          v-if="!data.readiness.realSendAllowedByServer"
+          class="small muted"
+          style="margin-top:6px"
+        >
+          Além disso, o servidor só libera envio real com WHATSAPP_ALLOW_REAL_SEND=true — hoje está desligado.
+        </p>
+      </div>
+
+      <div class="card stack-md">
+        <h2 style="font-size:18px">
+          Coexistência com o celular da igreja
+        </h2>
+        <p
+          class="soft"
+          style="font-size:14.5px;margin-top:-4px"
+        >
+          O mesmo número continua no aparelho. Registre como testaram.
+        </p>
+        <textarea
+          v-model="coexNote"
+          class="textarea"
+          style="min-height:84px;resize:vertical"
+          aria-label="Como testaram a coexistência"
+          placeholder="Ex.: 20/09 — mandamos “teste” pelo app e a resposta chegou no celular da secretaria."
+          :disabled="coexOk"
+        />
+        <SwitchRow
+          :model-value="coexOk"
+          title="Comprovado"
+          boxed
+          @update:model-value="toggleCoex"
+        >
+          <template #sub>
+            <span
+              v-if="coexOk"
+              class="small"
+              style="display:block;color:#155f30;font-weight:700"
+            >Registrado{{ data.coexistence.verifiedAt ? ` · ${stamp(data.coexistence.verifiedAt, tz)}` : '' }}</span>
+            <span
+              v-else
+              class="small muted"
+              style="display:block"
+            >Marque quando o teste funcionar.</span>
+          </template>
+        </SwitchRow>
+      </div>
+
+      <div class="card card--flush">
+        <div
+          class="row"
+          style="gap:10px;padding:16px 18px 8px"
+        >
+          <h2 style="font-size:18px;flex:1">
+            Modelos de mensagem
+          </h2>
+          <span
+            class="soft"
+            style="font-size:13.5px"
+          >{{ approved }} de {{ data.templates.length }} aprovados</span>
+        </div>
+        <div
+          v-for="t in data.templates"
+          :key="t.kind"
+        >
+          <button
+            type="button"
+            class="listrow"
+            style="border-top:1px solid var(--line-2)"
+            :aria-expanded="openTpl === t.kind"
+            @click="openTpl = openTpl === t.kind ? null : t.kind"
+          >
+            <span style="flex:1;min-width:0">
+              <span
+                class="strong"
+                style="display:block"
+              >{{ t.label }}</span>
+              <span
+                class="muted"
+                style="display:block;font-size:13px"
+              >Variáveis: {{ t.params.join(', ') }}</span>
+            </span>
+            <span
+              class="stag"
+              :style="{ background: TSTATUS[tplStatus[t.kind]!]?.bg, color: TSTATUS[tplStatus[t.kind]!]?.fg }"
+            >{{ TSTATUS[tplStatus[t.kind]!]?.label }}</span>
+            <Icon
+              :name="openTpl === t.kind ? 'chevron-up' : 'chevron-down'"
+              class="listrow__chev"
+            />
+          </button>
+          <div
+            v-if="openTpl === t.kind"
+            class="stack-sm"
+            style="padding:0 16px 14px"
+          >
+            <div
+              class="bubble"
+              style="background:#e7f6e4;border-radius:18px 18px 18px 4px;max-width:none;white-space:pre-wrap"
+            >
+              {{ t.body }}
+            </div>
+            <p
+              v-if="tplStatus[t.kind] === 'rejected'"
+              style="font-size:13.5px;color:#8f2a1e;font-weight:700"
+            >
+              A Meta rejeitou este modelo. Ajuste o texto no painel e envie de novo.
+            </p>
+            <p class="small muted">
+              Nome no painel: <code class="mono">{{ t.name }}</code> · categoria utilidade · português
+              <button
+                type="button"
+                class="link"
+                style="font-size:13.5px;margin-left:6px"
+                @click="copy(t.body)"
+              >
+                Copiar texto
+              </button>
+            </p>
+            <div
+              class="chips"
+              role="radiogroup"
+              :aria-label="`Situação de ${t.label}`"
+            >
+              <button
+                v-for="(s, k) in TSTATUS"
+                :key="k"
+                type="button"
+                role="radio"
+                class="chip"
+                :aria-checked="tplStatus[t.kind] === k"
+                :aria-pressed="tplStatus[t.kind] === k"
+                @click="tplStatus[t.kind] = k"
+              >
+                {{ s.label }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="savebar">
+        <button
+          type="button"
+          class="btn btn--float"
+          :disabled="saving"
+          @click="save"
+        >
+          Salvar
+        </button>
       </div>
     </template>
   </div>

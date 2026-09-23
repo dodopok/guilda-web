@@ -7,15 +7,24 @@ const { capi, tz, link } = useChurch()
 const toast = useToast()
 const { data, refresh } = await useAsyncData(`swaps-${route.params.slug}`, () => capi<{ swaps: Swap[] }>('/me/swaps'))
 const busy = ref<string | null>(null)
-const received = computed(() => (data.value?.swaps ?? []).filter((s) => s.direction === 'received' && s.status === 'proposed'))
-const others = computed(() => (data.value?.swaps ?? []).filter((s) => !(s.direction === 'received' && s.status === 'proposed')))
-const STATUS: Record<string, string> = { proposed: 'aguardando resposta', accepted: 'aceita — troca feita', rejected: 'recusada', cancelled: 'cancelada', superseded: 'sem efeito (a tarefa mudou)' }
+// Respostas desta visita ficam na tela, com o resultado, até sair.
+const answered = reactive<Record<string, 'accepted' | 'rejected'>>({})
+const incoming = computed(() => (data.value?.swaps ?? []).filter((s) => s.direction === 'received' && (s.status === 'proposed' || answered[s.id])))
+const outgoing = computed(() => (data.value?.swaps ?? []).filter((s) => s.direction === 'sent'))
+const OUT: Record<string, { label: string, bg: string, fg: string }> = {
+  proposed: { label: 'aguardando', bg: '#fff1d6', fg: '#a86400' },
+  accepted: { label: 'aceito', bg: '#e3f3e8', fg: '#155f30' },
+  rejected: { label: 'recusado', bg: '#f0efe9', fg: '#4a5450' },
+  cancelled: { label: 'cancelado', bg: '#f0efe9', fg: '#4a5450' },
+  superseded: { label: 'sem efeito', bg: '#f0efe9', fg: '#4a5450' },
+}
+const taskLine = (s: Swap) => `${s.dutyName} · ${weekdayShort(s.startsAt, tz.value)} ${shortDate(s.startsAt, tz.value)}, ${time(s.startsAt, tz.value)}`
 
 async function answer(s: Swap, accept: boolean) {
   busy.value = s.id
   try {
     await capi(`/swaps/${s.id}/${accept ? 'accept' : 'reject'}`, { method: 'POST' })
-    toast.ok(accept ? `Pronto: ${s.dutyName} agora é sua tarefa, já confirmada.` : `Você recusou. ${s.fromName} continua com a tarefa.`)
+    answered[s.id] = accept ? 'accepted' : 'rejected'
   } catch (e) {
     toast.error(e)
   } finally {
@@ -27,107 +36,132 @@ async function answer(s: Swap, accept: boolean) {
 
 <template>
   <section class="stack-lg w-640">
-    <BackLink
-      :to="link('')"
-      label="Início"
+    <PageHead
+      title="Pedidos de troca"
+      lede="Quando alguém pede para você assumir uma tarefa — ou você pede a alguém."
+      :back="link('/perfil')"
+      back-label="Você"
     />
     <div>
-      <h1 class="h1--sm">
-        Pedidos de troca
-      </h1>
-      <p class="lede">
-        A troca só vale quando a pessoa convidada aceita.
-      </p>
-    </div>
-    <div
-      v-if="!received.length && !others.length"
-      class="card--dashed"
-    >
       <p
-        class="strong"
-        style="font-size:18px"
+        class="caps"
+        style="margin-bottom:8px"
       >
-        Nenhum pedido
-      </p>
-      <p
-        class="soft"
-        style="margin:6px auto 0;max-width:380px"
-      >
-        Quando alguém pedir que você assuma uma tarefa, o pedido aparece aqui.
-      </p>
-    </div>
-    <section
-      v-if="received.length"
-      class="stack-sm"
-    >
-      <p class="section-label">
         Para você responder
       </p>
-      <article
-        v-for="s in received"
-        :key="s.id"
-        class="card card--lg stack-sm"
+      <div
+        v-if="incoming.length"
+        class="stack-sm"
+        style="gap:10px"
       >
-        <p style="font-size:17px">
-          <strong>{{ s.fromName }}</strong> pediu que você assuma <strong>{{ s.dutyName }}</strong>
-        </p>
-        <p class="soft">
-          {{ s.serviceTitle }} · {{ longDate(s.startsAt, tz) }}, {{ time(s.startsAt, tz) }}<template v-if="s.location">
-            · {{ s.location }}
-          </template>
-        </p>
-        <p
-          v-if="s.message"
-          class="note"
+        <div
+          v-for="s in incoming"
+          :key="s.id"
+          class="card"
         >
-          “{{ s.message }}”
-        </p>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:4px">
-          <button
-            type="button"
-            class="btn btn--ok"
-            style="min-height:48px"
-            :disabled="busy === s.id"
-            @click="answer(s, true)"
+          <div
+            class="row"
+            style="gap:12px;align-items:flex-start;flex-wrap:nowrap"
+          >
+            <span
+              class="av"
+              style="width:40px;height:40px"
+              aria-hidden="true"
+            >{{ initials(s.fromName) }}</span>
+            <span style="flex:1;min-width:0">
+              <span style="display:block;font-size:15.5px"><strong>{{ s.fromName }}</strong> pede para você assumir</span>
+              <span
+                class="strong"
+                style="display:block;font-size:17px;margin-top:2px"
+              >{{ taskLine(s) }}</span>
+              <span
+                v-if="s.message"
+                style="display:block;margin-top:8px;font-size:14.5px;color:var(--ink-2);background:var(--surface-2);border-radius:12px;padding:8px 12px"
+              >“{{ s.message }}”</span>
+            </span>
+          </div>
+          <div
+            v-if="answered[s.id] === 'accepted'"
+            class="row"
+            role="status"
+            style="gap:10px;margin-top:12px;padding:12px 14px;border-radius:14px;background:#e3f3e8;color:#155f30;font-weight:700;flex-wrap:nowrap"
           >
             <Icon
               name="check"
-              :weight="2.2"
-            />Aceitar
-          </button>
-          <button
-            type="button"
-            class="btn btn--secondary"
-            style="min-height:48px"
-            :disabled="busy === s.id"
-            @click="answer(s, false)"
+              :weight="2.6"
+              style="width:18px;height:18px"
+            />Você assumiu. {{ s.fromName }} e a coordenação já sabem.
+          </div>
+          <div
+            v-else-if="answered[s.id] === 'rejected'"
+            role="status"
+            style="margin-top:12px;padding:12px 14px;border-radius:14px;background:#f0efe9;color:#4a5450;font-weight:700"
           >
-            Não posso
-          </button>
-        </div>
-      </article>
-    </section>
-    <section
-      v-if="others.length"
-      class="stack-sm"
-    >
-      <p class="section-label">
-        Histórico
-      </p>
-      <div class="card card--flush list">
-        <div
-          v-for="s in others"
-          :key="s.id"
-          style="padding:12px 16px"
-        >
-          <p style="font-weight:700">
-            {{ s.direction === 'sent' ? `Você pediu a ${s.candidateName}` : `${s.fromName} pediu a você` }}: {{ s.dutyName }}
-          </p>
-          <p class="soft small">
-            {{ longDate(s.startsAt, tz) }} · {{ STATUS[s.status] ?? s.status }}
-          </p>
+            Você não pôde. {{ s.fromName }} já sabe.
+          </div>
+          <div
+            v-else
+            class="row"
+            style="gap:10px;margin-top:12px"
+          >
+            <button
+              type="button"
+              class="btn"
+              style="flex:1"
+              :disabled="busy === s.id"
+              @click="answer(s, true)"
+            >
+              Assumo
+            </button>
+            <button
+              type="button"
+              class="btn btn--secondary"
+              style="min-height:50px;font-size:15px"
+              :disabled="busy === s.id"
+              @click="answer(s, false)"
+            >
+              Não consigo
+            </button>
+          </div>
         </div>
       </div>
-    </section>
+      <div
+        v-else
+        class="card--dashed soft"
+        style="padding:24px 20px"
+      >
+        Nenhum pedido esperando você.
+      </div>
+    </div>
+    <div v-if="outgoing.length">
+      <p
+        class="caps"
+        style="margin-bottom:8px"
+      >
+        Você pediu
+      </p>
+      <div class="card card--flush rows">
+        <div
+          v-for="s in outgoing"
+          :key="s.id"
+          class="rowline rowline--center"
+        >
+          <span style="flex:1;min-width:0">
+            <span
+              class="strong"
+              style="display:block"
+            >{{ taskLine(s) }}</span>
+            <span
+              class="soft"
+              style="display:block;font-size:13.5px"
+            >para {{ s.candidateName }}</span>
+          </span>
+          <span
+            class="stag"
+            :style="{ background: OUT[s.status]?.bg ?? '#f0efe9', color: OUT[s.status]?.fg ?? '#4a5450' }"
+          >{{ OUT[s.status]?.label ?? s.status }}</span>
+        </div>
+      </div>
+    </div>
   </section>
 </template>

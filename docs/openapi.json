@@ -1071,6 +1071,10 @@
                     "type": "string",
                     "maxLength": 200
                   },
+                  "city": {
+                    "type": "string",
+                    "maxLength": 80
+                  },
                   "coordinator": {
                     "type": "object",
                     "properties": {
@@ -1297,6 +1301,17 @@
                       {
                         "type": "string",
                         "maxLength": 200
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "city": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 80
                       },
                       {
                         "type": "null"
@@ -3475,6 +3490,15 @@
             "name": "church",
             "in": "path",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "past",
+            "in": "query",
+            "required": false,
+            "description": "1 inclui as dos últimos 90 dias",
             "schema": {
               "type": "string"
             }

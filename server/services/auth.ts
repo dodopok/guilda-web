@@ -123,6 +123,8 @@ export async function listMemberships(db: DbOrTx, accountId: string) {
     slug: churches.slug,
     name: churches.name,
     timezone: churches.timezone,
+    accentColor: churches.accentColor,
+    city: churches.city,
     personId: people.id,
     displayName: people.displayName,
     roles: people.roles,
@@ -315,8 +317,8 @@ async function issuePasswordReset(db: Db, account: Account, person: typeof peopl
   })
 }
 
-export async function resetPassword(db: Db, token: string, password: string) {
-  await db.transaction(async (tx) => {
+export async function resetPassword(db: Db, token: string, password: string, opts: { client?: 'web' | 'native', userAgent?: string | null } = {}) {
+  return db.transaction(async (tx) => {
     const row = await findValidToken(tx, token, 'password_reset', true)
     const account = await tx.query.accounts.findFirst({ where: eq(accounts.id, row.accountId!) })
     if (!account) throw new AppError(410, 'token_invalid', 'Link inválido.')
@@ -326,6 +328,8 @@ export async function resetPassword(db: Db, token: string, password: string) {
     await tx.update(authTokens).set({ usedAt: new Date() }).where(eq(authTokens.id, row.id))
     await revokeAllSessions(tx, account.id)
     await audit(tx, { churchId: row.churchId, actorAccountId: account.id, action: 'password_reset.completed', entityType: 'account', entityId: account.id })
+    // Todas as sessões antigas caem; abre só a deste aparelho, que acabou de provar posse do link.
+    return createSession(tx, account.id, opts.client ?? 'web', opts.userAgent)
   })
 }
 

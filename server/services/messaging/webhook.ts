@@ -51,6 +51,7 @@ export async function handleWebhook(db: Db, rawBody: string, signature: string |
     throw new AppError(401, 'unauthorized', 'Assinatura inválida.')
   }
   const churchId = channel.churchId
+  await db.update(whatsappChannels).set({ lastWebhookAt: new Date() }).where(eq(whatsappChannels.churchId, churchId))
   const result: WebhookResult = { statusesApplied: 0, duplicates: 0, optOuts: 0 }
 
   for (const entry of parsed.data.entry) {
@@ -193,6 +194,7 @@ export async function handleYCloudWebhook(db: Db, rawBody: string, signature: st
     throw new AppError(401, 'unauthorized', 'Assinatura inválida.')
   }
   const churchId = channel.churchId
+  await db.update(whatsappChannels).set({ lastWebhookAt: now }).where(eq(whatsappChannels.churchId, churchId))
   const result: WebhookResult = { statusesApplied: 0, duplicates: 0, optOuts: 0 }
   const created = parseTime(event.createTime, now)
 

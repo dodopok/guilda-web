@@ -101,3 +101,9 @@ export function isoToLocalParts(d: D, tz: string) {
   const [h, m] = fmt(tz, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(toDate(d)).split(':')
   return { date, time: `${h}:${m}` }
 }
+
+// "hoje · 08:40" / "qui 24/09 · 19:00"
+export function stamp(d: D, tz: string, now = new Date()) {
+  const day = localDateKey(d, tz) === localDateKey(now, tz) ? 'hoje' : `${weekdayShort(d, tz)} ${shortDate(d, tz)}`
+  return `${day} · ${fmt(tz, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(toDate(d))}`
+}

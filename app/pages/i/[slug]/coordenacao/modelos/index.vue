@@ -5,36 +5,34 @@ const { capi, link } = useChurch()
 const toast = useToast()
 interface T { id: string, name: string, kind: string, description: string | null, archived: boolean, blockCount: number }
 const { data, refresh } = await useAsyncData(`templates-${route.params.slug}`, () => capi<{ templates: T[] }>('/templates'))
-const KIND: Record<string, string> = { regular: 'comum', special: 'especial', short: 'curto' }
-const form = reactive({ name: '', kind: 'regular' })
+const active = computed(() => (data.value?.templates ?? []).filter((t) => !t.archived))
+const archived = computed(() => (data.value?.templates ?? []).filter((t) => t.archived))
+
+const busy = ref(false)
 async function create() {
+  busy.value = true
   try {
-    const r = await capi<{ template: T }>('/templates', { method: 'POST', body: { name: form.name, kind: form.kind, blocks: [] } })
+    const r = await capi<{ template: T }>('/templates', { method: 'POST', body: { name: 'Novo modelo', kind: 'regular', blocks: [] } })
     await navigateTo(link(`/coordenacao/modelos/${r.template.id}`))
+  } catch (e) {
+    toast.error(e)
+  } finally {
+    busy.value = false
+  }
+}
+async function duplicate(t: T) {
+  try {
+    await capi(`/templates/${t.id}/duplicate`, { method: 'POST', body: { name: `${t.name} (cópia)`.slice(0, 120), kind: t.kind } })
+    toast.ok(`“${t.name}” duplicado.`)
+    await refresh()
   } catch (e) {
     toast.error(e)
   }
 }
-const dup = ref<T | null>(null)
-const dupForm = reactive({ name: '', kind: 'special' })
-const dupOpen = computed({ get: () => Boolean(dup.value), set: (v) => { if (!v) dup.value = null } })
-function openDup(t: T) {
-  dup.value = t
-  Object.assign(dupForm, { name: `${t.name} (cópia)`, kind: t.kind })
-}
-async function duplicate() {
-  if (!dup.value) return
+async function setArchived(t: T, value: boolean) {
   try {
-    const r = await capi<{ template: T }>(`/templates/${dup.value.id}/duplicate`, { method: 'POST', body: dupForm })
-    dup.value = null
-    await navigateTo(link(`/coordenacao/modelos/${r.template.id}`))
-  } catch (e) {
-    toast.error(e)
-  }
-}
-async function archive(t: T, archived: boolean) {
-  try {
-    await capi(`/templates/${t.id}`, { method: 'PATCH', body: { archived } })
+    await capi(`/templates/${t.id}`, { method: 'PATCH', body: { archived: value } })
+    toast.ok(value ? `“${t.name}” arquivado. Roteiros já criados não mudam.` : `“${t.name}” de volta.`)
     await refresh()
   } catch (e) {
     toast.error(e)
@@ -43,134 +41,117 @@ async function archive(t: T, archived: boolean) {
 </script>
 
 <template>
-  <div class="page page--wide">
-    <NuxtLink
-      :to="`/i/${$route.params.slug}/coordenacao/configuracoes`"
-      class="back"
+  <div class="stack-lg w-760">
+    <PageHead
+      title="Modelos de liturgia"
+      lede="A ordem do culto que o roteiro usa de base."
+      :back="link('/coordenacao/configuracoes')"
+      back-label="Configurações"
     >
-      <Icon
-        name="arrow-left"
-        :weight="2"
-      />Configurações
-    </NuxtLink>
-    <div class="page-head">
-      <p class="kicker">
-        Cadastro
-      </p>
-      <h1>Modelos de liturgia</h1>
-      <p class="lede">
-        A estrutura de cada tipo de culto, com os textos do LOC que a coordenação cadastra. Duplique para celebrações especiais ou liturgias curtas.
-      </p>
-    </div>
-    <div
-      class="notice notice--wait"
-      style="margin-bottom:1.5rem"
-    >
-      <p><strong>Direitos dos textos do LOC.</strong> Os textos ficam apenas nesta igreja. Antes de oferecer modelos a outras comunidades, confirme a permissão de exibição e redistribuição com quem detém os direitos.</p>
-    </div>
-    <ul class="lines">
-      <li
-        v-for="t in data?.templates ?? []"
-        :key="t.id"
-        class="line"
+      <button
+        type="button"
+        class="btn btn--md"
+        style="font-size:15px"
+        :disabled="busy"
+        @click="create"
       >
-        <span class="line__main">
-          <NuxtLink
-            :to="link(`/coordenacao/modelos/${t.id}`)"
-            class="line__title"
-            style="font-size:1.1rem"
-          >{{ t.name }}</NuxtLink>
+        <Icon
+          name="plus"
+          :weight="2.2"
+          style="width:16px;height:16px"
+        />Criar modelo
+      </button>
+    </PageHead>
+
+    <div
+      v-if="active.length"
+      class="card card--flush rows"
+    >
+      <div
+        v-for="t in active"
+        :key="t.id"
+        class="rowline rowline--center"
+      >
+        <NuxtLink
+          :to="link(`/coordenacao/modelos/${t.id}`)"
+          class="row"
+          style="flex:1;min-width:220px;gap:12px;flex-wrap:nowrap;color:inherit;text-decoration:none"
+        >
           <span
-            class="tag tag--plain"
-            style="margin-left:.4rem"
-          >{{ KIND[t.kind] }}</span>
-          <span
-            v-if="t.archived"
-            class="tag tag--plain"
-            style="margin-left:.25rem"
-          >arquivado</span>
-          <span
-            class="line__sub"
-            style="display:block"
-          >{{ t.description }}{{ t.description ? ' · ' : '' }}{{ plural(t.blockCount, 'bloco', 'blocos') }}</span>
-        </span>
+            class="ticon"
+            style="width:44px;height:44px;border-radius:14px;font-weight:800;font-size:15px"
+            aria-hidden="true"
+          >{{ t.blockCount }}</span>
+          <span style="flex:1;min-width:0">
+            <span
+              class="row"
+              style="gap:8px"
+            >
+              <span
+                class="strong"
+                style="font-size:16px"
+              >{{ t.name }}</span>
+              <span class="tag">{{ TEMPLATE_KIND[t.kind] ?? t.kind }}</span>
+            </span>
+            <span
+              class="soft"
+              style="display:block;font-size:13.5px"
+            >{{ plural(t.blockCount, 'bloco', 'blocos') }}{{ t.description ? ` · ${t.description}` : '' }}</span>
+          </span>
+        </NuxtLink>
         <span
           class="row"
-          style="gap:.35rem"
+          style="gap:6px"
         >
           <button
             type="button"
-            class="btn btn--small"
-            @click="openDup(t)"
+            class="btn btn--line btn--xs"
+            @click="duplicate(t)"
           >Duplicar</button>
           <button
             type="button"
-            class="btn btn--quiet btn--small"
-            @click="archive(t, !t.archived)"
-          >{{ t.archived ? 'Reativar' : 'Arquivar' }}</button>
+            class="btn btn--line btn--xs"
+            style="color:var(--muted)"
+            @click="setArchived(t, true)"
+          >Arquivar</button>
         </span>
-      </li>
-    </ul>
-    <form
-      class="notice notice--accent"
-      style="margin-top:2rem"
-      @submit.prevent="create"
-    >
-      <h3>Novo modelo</h3>
-      <div
-        class="row"
-        style="align-items:flex-end"
-      >
-        <label
-          class="field"
-          style="margin:0;flex:1;min-width:14rem"
-        ><span class="field__label">Nome</span><input
-          v-model="form.name"
-          class="input"
-          required
-          placeholder="Ex.: Quarta-feira de Cinzas"
-        ></label>
-        <label
-          class="field"
-          style="margin:0"
-        ><span class="field__label">Tipo</span><select
-          v-model="form.kind"
-          class="select"
-        ><option value="regular">Comum</option><option value="special">Especial</option><option value="short">Curto</option></select></label>
-        <button class="btn btn--primary">
-          Criar e editar
-        </button>
       </div>
-    </form>
-    <Sheet
-      v-model:open="dupOpen"
-      title="Duplicar modelo"
-    >
-      <label class="field"><span class="field__label">Nome da cópia</span><input
-        v-model="dupForm.name"
-        class="input"
-        required
-      ></label>
-      <label class="field"><span class="field__label">Tipo</span><select
-        v-model="dupForm.kind"
-        class="select"
-      ><option value="regular">Comum</option><option value="special">Especial</option><option value="short">Curto</option></select></label>
-      <template #foot>
-        <button
-          type="button"
-          class="btn"
-          @click="dup = null"
+    </div>
+    <EmptyState
+      v-else
+      title="Nenhum modelo ainda"
+      text="Crie a ordem do culto uma vez; cada roteiro começa dela."
+    />
+
+    <details v-if="archived.length">
+      <summary
+        class="strong"
+        style="cursor:pointer;font-weight:700;color:var(--muted);font-size:14.5px;list-style:none"
+      >
+        Arquivados ({{ archived.length }}) ›
+      </summary>
+      <div
+        class="card card--flush rows"
+        style="margin-top:8px"
+      >
+        <div
+          v-for="t in archived"
+          :key="t.id"
+          class="rowline rowline--center"
         >
-          Cancelar
-        </button>
-        <button
-          type="button"
-          class="btn btn--primary"
-          @click="duplicate"
-        >
-          Duplicar e editar
-        </button>
-      </template>
-    </Sheet>
+          <span
+            class="strong soft"
+            style="flex:1;font-weight:700"
+          >{{ t.name }}</span>
+          <button
+            type="button"
+            class="btn btn--line btn--xs"
+            @click="setArchived(t, false)"
+          >
+            Restaurar
+          </button>
+        </div>
+      </div>
+    </details>
   </div>
 </template>

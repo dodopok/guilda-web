@@ -137,10 +137,19 @@ export async function listSwapCandidates(db: Db, ctx: ChurchContext, assignmentI
     .innerJoin(people, and(eq(people.churchId, qualifications.churchId), eq(people.id, qualifications.personId)))
     .where(and(eq(qualifications.churchId, ctx.church.id), eq(qualifications.dutyId, slot.dutyId), eq(people.status, 'active'), ne(people.id, a.personId)))
     .orderBy(asc(people.nameKey))
+  // Quantas tarefas cada pessoa já tem no mês do culto, para ajudar a escolher sem sobrecarregar.
+  const counts = qualified.length
+    ? await db.select({ personId: assignments.personId, n: sql<number>`count(*)::int` }).from(assignments)
+        .innerJoin(slots, and(eq(slots.churchId, assignments.churchId), eq(slots.id, assignments.slotId)))
+        .innerJoin(services, and(eq(services.churchId, slots.churchId), eq(services.id, slots.serviceId)))
+        .where(and(eq(assignments.churchId, ctx.church.id), eq(services.month, service.month), inArray(assignments.personId, qualified.map((p) => p.id))))
+        .groupBy(assignments.personId)
+    : []
+  const countOf = new Map(counts.map((c) => [c.personId, c.n]))
   const result = []
   for (const p of qualified) {
     const problems = await candidateProblems(db, ctx.church.id, p.id, slot, service)
-    result.push({ personId: p.id, displayName: p.displayName, available: problems.length === 0, problems: problems.map((x) => PROBLEM_TEXT[x]) })
+    result.push({ personId: p.id, displayName: p.displayName, available: problems.length === 0, problems: problems.map((x) => PROBLEM_TEXT[x]), monthTasks: countOf.get(p.id) ?? 0, month: service.month })
   }
   return result
 }

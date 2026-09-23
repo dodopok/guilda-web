@@ -199,28 +199,48 @@ async function removeDuty() {
   }
 }
 const newDutyOpen = ref(false)
-const nd = reactive({ ministryId: '', ministryName: '', name: '' })
+const nd = reactive({ ministryId: '', ministryName: '', name: '', required: 1, arrival: '' as string | number, instructions: '' })
 function openNewDuty() {
-  Object.assign(nd, { ministryId: data.value?.ministries[0]?.id ?? '', ministryName: '', name: '' })
+  Object.assign(nd, { ministryId: data.value?.ministries[0]?.id ?? 'new', ministryName: '', name: '', required: 1, arrival: '', instructions: '' })
   newDutyOpen.value = true
 }
 async function saveNewDuty() {
+  if (nd.name.trim().length < 2) {
+    toast.error('Dê um nome à função.')
+    return
+  }
   try {
     let ministryId = nd.ministryId
     if (ministryId === 'new' || !ministryId) {
       if (nd.ministryName.trim().length < 2) {
-        toast.error('Dê um nome ao novo grupo.')
+        toast.error('Dê um nome ao novo ministério.')
         return
       }
       ministryId = (await capi<{ ministry: { id: string } }>('/ministries', { method: 'POST', body: { name: nd.ministryName.trim() } })).ministry.id
     }
-    await capi('/duties', { method: 'POST', body: { ministryId, name: nd.name.trim() } })
-    toast.ok(`Função ${nd.name.trim()} criada.`)
+    await capi('/duties', {
+      method: 'POST',
+      body: {
+        ministryId,
+        name: nd.name.trim(),
+        defaultRequiredCount: Math.max(1, Number(nd.required) || 1),
+        arrivalMinutesBefore: nd.arrival === '' ? null : Math.max(0, Number(nd.arrival) || 0),
+        instructions: nd.instructions.trim() || null,
+      },
+    })
+    toast.ok(`Função ${nd.name.trim()} criada. Agora marque quem pode fazer.`)
     newDutyOpen.value = false
     await refresh()
   } catch (e) {
     toast.error(e)
   }
+}
+const dataOpen = ref(false)
+watch(personId, () => (dataOpen.value = false))
+function setRole(r: 'vol' | 'coord' | 'pastor') {
+  if (r === 'vol') Object.assign(edit, { coordinator: false, pastor: false })
+  else if (r === 'coord') edit.coordinator = !edit.coordinator
+  else edit.pastor = !edit.pastor
 }
 </script>
 
@@ -358,6 +378,23 @@ async function saveNewDuty() {
 
     <template v-else>
       <div
+        class="row"
+        style="justify-content:flex-end"
+      >
+        <button
+          type="button"
+          class="btn btn--md"
+          style="font-size:15px"
+          @click="openNewDuty"
+        >
+          <Icon
+            name="plus"
+            :weight="2.2"
+            style="width:16px;height:16px"
+          />Nova função
+        </button>
+      </div>
+      <div
         v-for="g in groups"
         :key="g.m.id"
         class="card card--flush"
@@ -390,16 +427,6 @@ async function saveNewDuty() {
           />
         </button>
       </div>
-      <button
-        type="button"
-        class="btn btn--dashed"
-        @click="openNewDuty"
-      >
-        <Icon
-          name="plus"
-          :weight="2"
-        />Nova função
-      </button>
     </template>
 
     <!-- Pessoa -->
@@ -424,6 +451,96 @@ async function saveNewDuty() {
         </div>
       </template>
       <template v-if="person">
+        <div style="margin-top:14px;border:1.5px solid var(--control);border-radius:14px;overflow:hidden">
+          <button
+            type="button"
+            class="listrow"
+            style="padding:12px 14px"
+            :aria-expanded="dataOpen"
+            @click="dataOpen = !dataOpen"
+          >
+            <span class="grow"><span
+              class="strong"
+              style="display:block"
+            >Dados e papel</span><span
+              class="muted"
+              style="display:block;font-size:13.5px"
+            >Nome, celular, coordenação ou pastoral</span></span>
+            <Icon
+              :name="dataOpen ? 'chevron-up' : 'chevron-down'"
+              class="listrow__chev"
+            />
+          </button>
+          <div
+            v-if="dataOpen"
+            class="stack-md"
+            style="padding:12px 14px 14px;border-top:1px solid var(--line-2)"
+          >
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px">
+              <label class="field"><span class="field__label">Nome</span><input
+                v-model="edit.displayName"
+                class="input"
+              ></label>
+              <label class="field"><span class="field__label">Celular</span><input
+                v-model="edit.phone"
+                class="input"
+                type="tel"
+                placeholder="(51) 99999-9999"
+              ></label>
+            </div>
+            <p
+              v-if="(edit.phone.trim() || null) !== (person.phone ?? null) && person.phone"
+              class="small"
+              style="color:#a86400;margin-top:-6px"
+            >
+              Trocar o número retira a autorização do WhatsApp e cancela convites pendentes.
+            </p>
+            <div>
+              <span class="field__label">Papel</span>
+              <div class="chips">
+                <button
+                  type="button"
+                  class="chip"
+                  :aria-pressed="!edit.coordinator && !edit.pastor"
+                  @click="setRole('vol')"
+                >
+                  Voluntário(a)
+                </button>
+                <button
+                  type="button"
+                  class="chip"
+                  :aria-pressed="edit.coordinator"
+                  @click="setRole('coord')"
+                >
+                  Coordenação
+                </button>
+                <button
+                  type="button"
+                  class="chip"
+                  :aria-pressed="edit.pastor"
+                  @click="setRole('pastor')"
+                >
+                  Pastoral
+                </button>
+              </div>
+            </div>
+            <SwitchRow
+              v-model="edit.restExempt"
+              title="Não entra no alerta de descanso"
+              sub="Para quem serve todo domingo por escolha, como pastores."
+              boxed
+            />
+            <button
+              type="button"
+              class="link"
+              style="align-self:flex-start"
+              :style="person.status === 'active' ? 'color:var(--no)' : ''"
+              @click="setActive(person.status !== 'active')"
+            >
+              {{ person.status === 'active' ? 'Desativar pessoa' : 'Reativar pessoa' }}
+            </button>
+          </div>
+        </div>
         <div
           class="stack-sm"
           style="margin-top:16px"
@@ -527,61 +644,6 @@ async function saveNewDuty() {
             </div>
           </div>
         </div>
-        <details style="margin-top:18px">
-          <summary
-            class="strong"
-            style="cursor:pointer"
-          >
-            Dados e papel ›
-          </summary>
-          <div
-            class="stack-md"
-            style="margin-top:12px"
-          >
-            <label class="field"><span class="field__label">Nome</span><input
-              v-model="edit.displayName"
-              class="input"
-            ></label>
-            <label class="field"><span class="field__label">Celular (WhatsApp)</span><input
-              v-model="edit.phone"
-              class="input"
-              type="tel"
-              placeholder="(51) 99999-9999"
-            ><span class="field__hint">Trocar o número retira a autorização do WhatsApp e cancela convites pendentes.</span></label>
-            <div class="chips">
-              <button
-                type="button"
-                class="chip chip--lg"
-                :aria-pressed="edit.coordinator"
-                @click="edit.coordinator = !edit.coordinator"
-              >
-                Coordenação
-              </button>
-              <button
-                type="button"
-                class="chip chip--lg"
-                :aria-pressed="edit.pastor"
-                @click="edit.pastor = !edit.pastor"
-              >
-                Pastoral
-              </button>
-            </div>
-            <SwitchRow
-              v-model="edit.restExempt"
-              title="Fora do alerta de folga"
-              sub="Para quem serve todo domingo por vocação (ex.: pastores)."
-              boxed
-            />
-            <button
-              type="button"
-              class="link link--muted"
-              style="align-self:flex-start"
-              @click="setActive(person.status !== 'active')"
-            >
-              {{ person.status === 'active' ? 'Inativar esta pessoa' : 'Reativar esta pessoa' }}
-            </button>
-          </div>
-        </details>
         <button
           type="button"
           class="btn btn--block"
@@ -714,36 +776,78 @@ async function saveNewDuty() {
     <Sheet
       v-model:open="newDutyOpen"
       title="Nova função"
-      lede="Depois você ajusta as instruções, a quantidade e quem pode fazer."
+      lede="Ela entra nos cultos e você marca quem pode fazer."
     >
       <form
         class="stack-md"
+        novalidate
         @submit.prevent="saveNewDuty"
       >
-        <label class="field"><span class="field__label">Grupo</span><select
-          v-model="nd.ministryId"
-          class="select"
-        >
-          <option
-            v-for="m in data.ministries"
-            :key="m.id"
-            :value="m.id"
-          >{{ m.name }}</option>
-          <option value="new">Novo grupo…</option>
-        </select></label>
+        <label class="field"><span class="field__label">Nome</span><input
+          v-model="nd.name"
+          class="input"
+          placeholder="Ex.: Som"
+          maxlength="80"
+        ></label>
+        <div>
+          <span class="field__label">Ministério</span>
+          <div class="chips">
+            <button
+              v-for="m in data.ministries"
+              :key="m.id"
+              type="button"
+              class="chip"
+              :aria-pressed="nd.ministryId === m.id"
+              @click="nd.ministryId = m.id"
+            >
+              {{ m.name }}
+            </button>
+            <button
+              type="button"
+              class="chip"
+              :aria-pressed="nd.ministryId === 'new'"
+              @click="nd.ministryId = 'new'"
+            >
+              <Icon
+                name="plus"
+                :weight="2.2"
+              />Outro
+            </button>
+          </div>
+        </div>
         <label
-          v-if="nd.ministryId === 'new' || !data.ministries.length"
+          v-if="nd.ministryId === 'new'"
           class="field"
-        ><span class="field__label">Nome do novo grupo</span><input
+        ><span class="field__label">Nome do novo ministério</span><input
           v-model="nd.ministryName"
           class="input"
           placeholder="Ex.: Recepção"
         ></label>
-        <label class="field"><span class="field__label">Nome da função</span><input
-          v-model="nd.name"
-          class="input"
-          placeholder="Ex.: Boas-vindas"
-        ></label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <label class="field"><span class="field__label">Pessoas por culto</span><input
+            v-model="nd.required"
+            class="input"
+            type="number"
+            min="1"
+            max="50"
+            inputmode="numeric"
+          ></label>
+          <label class="field"><span class="field__label">Chega quantos min antes</span><input
+            v-model="nd.arrival"
+            class="input"
+            type="number"
+            min="0"
+            max="600"
+            inputmode="numeric"
+            placeholder="a combinar"
+          ></label>
+        </div>
+        <label class="field"><span class="field__label">O que a pessoa faz</span><textarea
+          v-model="nd.instructions"
+          class="textarea"
+          style="min-height:70px;resize:vertical"
+          placeholder="Aparece para quem for escalado"
+        /></label>
         <button class="btn btn--block">
           Criar função
         </button>

@@ -19,11 +19,11 @@ defineEmits<{ (e: 'update:modelValue', v: boolean): void }>()
         class="strong"
         style="display:block"
       >{{ title }}</span></slot>
-      <span
+      <slot name="sub"><span
         v-if="sub"
         class="small soft"
         style="display:block"
-      >{{ sub }}</span>
+      >{{ sub }}</span></slot>
     </span>
     <span
       class="knob"

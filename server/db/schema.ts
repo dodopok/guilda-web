@@ -49,6 +49,7 @@ export const churches = pgTable('churches', {
   liturgicalReadingType: text('liturgical_reading_type').notNull().default('complementary'),
   // Identidade visual: cor da igreja (hex) usada nos botões e destaques do app.
   accentColor: text('accent_color').notNull().default('#2c5a41'),
+  city: text('city'),
   // Configuração inicial concluída pela coordenação (nula em igreja recém-criada).
   setupCompletedAt: ts('setup_completed_at'),
   createdAt: createdAt(),
@@ -431,6 +432,8 @@ export const whatsappChannels = pgTable('whatsapp_channels', {
   coexistenceStatus: text('coexistence_status').notNull().default('not_verified'),
   coexistenceNote: text('coexistence_note'),
   coexistenceVerifiedAt: ts('coexistence_verified_at'),
+  // Último webhook com assinatura válida: mostra que o endereço está respondendo.
+  lastWebhookAt: ts('last_webhook_at'),
   coexistenceVerifiedByAccountId: uuid('coexistence_verified_by_account_id').references(() => accounts.id, { onDelete: 'set null' }),
   // Em modo de teste só números da lista recebem mensagens reais.
   testMode: boolean('test_mode').notNull().default(true),

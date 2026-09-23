@@ -2,7 +2,7 @@
 import type { Church } from '~/types'
 
 useHead({ title: 'Configurações' })
-const { capi, link, info, tz, churchName, logoUrl, refreshInfo } = useChurch()
+const { capi, link, info, tz, churchName, logoUrl, refreshInfo, slug } = useChurch()
 const toast = useToast()
 
 const c = computed(() => info.value!.church)
@@ -139,13 +139,22 @@ const wa = computed(() => {
   if (mode === 'simulation') return { tag: 'modo de teste', tone: 'tag--wait', text: 'Hoje nenhuma mensagem sai de verdade. Para ligar, precisamos do número oficial da igreja e da autorização de cada pessoa — a gente te guia passo a passo.' }
   return { tag: 'desligado', tone: 'tag--no', text: 'Nenhuma mensagem sai. Ative o modo de teste para experimentar ou siga o passo a passo para ligar o canal oficial.' }
 })
-const MORE = [
-  { to: '/coordenacao/mensagens', label: 'Mensagens enviadas', sub: 'O que saiu, o que falhou e por quê', icon: 'message' },
-  { to: '/coordenacao/modelos', label: 'Modelos de liturgia', sub: 'A ordem do culto e os textos fixos', icon: 'book' },
-  { to: '/coordenacao/repertorio', label: 'Repertório de músicas', sub: 'Músicas que quem prega pode escolher', icon: 'music' },
-  { to: '/coordenacao/importar', label: 'Importar planilha', sub: 'Pessoas e escalas de uma planilha antiga', icon: 'upload' },
-  { to: '/coordenacao/historico', label: 'Histórico', sub: 'Quem mudou o quê, e quando', icon: 'clock' },
-]
+// Contagens dos atalhos: mensagens para revisar e músicas no repertório.
+const { data: toolCounts } = useLazyAsyncData(`tool-counts-${slug.value}`, async () => {
+  const [m, songs] = await Promise.all([
+    capi<{ counts: Record<string, number> }>('/messages?limit=1').catch(() => null),
+    capi<{ songs: unknown[] }>('/songs').catch(() => null),
+  ])
+  return { review: (m?.counts.failed ?? 0) + (m?.counts.unknown ?? 0), songs: songs?.songs.length ?? null }
+})
+const tools = computed(() => [
+  { to: '/coordenacao/mensagens', label: 'Mensagens enviadas', sub: 'Tudo que saiu pelo WhatsApp', icon: 'message', badge: toolCounts.value?.review ? `${toolCounts.value.review} para revisar` : '' },
+  { to: '/coordenacao/whatsapp', label: 'Canal do WhatsApp', sub: 'Modo, número e modelos de mensagem', icon: 'send', badge: info.value?.whatsappMode === 'simulation' ? 'simulação' : '' },
+  { to: '/coordenacao/modelos', label: 'Modelos de liturgia', sub: 'A ordem do culto', icon: 'book', badge: '' },
+  { to: '/coordenacao/repertorio', label: 'Repertório', sub: toolCounts.value?.songs != null ? plural(toolCounts.value.songs, 'música', 'músicas') : 'Músicas da igreja', icon: 'music', badge: '' },
+  { to: '/coordenacao/importar', label: 'Importar planilha', sub: 'Traga a escala antiga', icon: 'upload', badge: '' },
+  { to: '/coordenacao/historico', label: 'Histórico', sub: 'Quem mudou o quê', icon: 'clock', badge: '' },
+])
 </script>
 
 <template>
@@ -449,34 +458,22 @@ const MORE = [
       </NuxtLink>
     </div>
 
-    <div class="card card--flush list">
-      <NuxtLink
-        v-for="m in MORE"
-        :key="m.to"
-        :to="link(m.to)"
-        class="listrow"
-      >
-        <span
-          class="cta-card__icon"
-          style="width:38px;height:38px;border-radius:12px;background:var(--surface-3);color:var(--ink-2)"
-        ><Icon
-          :name="m.icon"
-          :weight="1.9"
-          style="width:20px;height:20px"
-        /></span>
-        <span class="grow"><span
-          class="strong"
-          style="display:block"
-        >{{ m.label }}</span><span
-          class="soft"
-          style="display:block;font-size:13.5px"
-        >{{ m.sub }}</span></span>
-        <Icon
-          name="chevron-right"
-          :weight="2"
-          class="listrow__chev"
+    <div class="card card--flush">
+      <p style="padding:16px 18px 8px;font-size:20px;font-weight:800">
+        Mais ferramentas
+      </p>
+      <div class="rows">
+        <ToolLink
+          v-for="m in tools"
+          :key="m.to"
+          :to="link(m.to)"
+          :icon="m.icon"
+          :label="m.label"
+          :sub="m.sub"
+          :badge="m.badge"
+          style="border-top:1px solid var(--line-2)"
         />
-      </NuxtLink>
+      </div>
     </div>
 
     <div class="savebar">

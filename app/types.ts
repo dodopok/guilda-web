@@ -5,6 +5,8 @@ export interface Membership {
   slug: string
   name: string
   timezone: string
+  accentColor: string
+  city: string | null
   personId: string
   displayName: string
   roles: string[]
@@ -21,6 +23,7 @@ export interface Church {
   name: string
   timezone: string
   defaultLocation: string | null
+  city: string | null
   reminderEnabled: boolean
   reminderWeekday: number
   reminderTime: string

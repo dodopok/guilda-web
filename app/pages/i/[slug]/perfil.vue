@@ -1,12 +1,22 @@
 <script setup lang="ts">
 useHead({ title: 'Você' })
 const route = useRoute()
-const { capi, churchName, isCoordinator, isPastor } = useChurch()
+const { capi, churchName, isCoordinator, isPastor, link } = useChurch()
 const { logout, memberships } = useSession()
 const toast = useToast()
 interface Profile { id: string, displayName: string, phoneMasked: string | null, roles: string[], consent: { status: string, updatedAt: string, source: string } | null, duties: { dutyId: string, name: string }[] }
 const { data, refresh } = await useAsyncData(`profile-${route.params.slug}`, () => capi<{ profile: Profile }>('/me'))
 const p = computed(() => data.value?.profile)
+const { data: counts } = await useAsyncData(`you-counts-${route.params.slug}`, async () => {
+  const [t, s] = await Promise.all([
+    capi<{ tasks: { service: { startsAt: string } }[] }>('/me/tasks').catch(() => ({ tasks: [] })),
+    capi<{ swaps: { direction: string, status: string }[] }>('/me/swaps').catch(() => ({ swaps: [] })),
+  ])
+  return {
+    upcoming: t.tasks.filter((x) => new Date(x.service.startsAt).getTime() >= Date.now()).length,
+    swaps: s.swaps.filter((x) => x.direction === 'received' && x.status === 'proposed').length,
+  }
+})
 const consentOn = computed(() => p.value?.consent?.status === 'granted')
 const roleLabel = computed(() => (isCoordinator.value ? 'Coordenação' : isPastor.value ? 'Pastoral' : 'Voluntário(a)'))
 const { info } = useChurch()
@@ -75,6 +85,23 @@ async function logoutOthers() {
           {{ roleLabel }} · {{ churchName }}
         </p>
       </div>
+    </div>
+
+    <div class="card card--flush rows">
+      <ToolLink
+        :to="link('/tarefas')"
+        icon="calendar"
+        label="Suas escalas"
+        :sub="counts?.upcoming ? plural(counts.upcoming, 'próxima tarefa', 'próximas tarefas') : 'Nada marcado'"
+      />
+      <ToolLink
+        :to="link('/trocas')"
+        icon="swap"
+        label="Pedidos de troca"
+        :sub="counts?.swaps ? 'Alguém precisa de você' : 'Nenhum pedido aberto'"
+        :badge="counts?.swaps || null"
+        badge-tone="red"
+      />
     </div>
 
     <div class="card card--flush list">

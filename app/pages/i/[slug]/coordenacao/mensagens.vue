@@ -1,379 +1,254 @@
 <script setup lang="ts">
 import type { MessageRow } from '~/types'
 
-useHead({ title: 'Mensagens' })
+useHead({ title: 'Mensagens enviadas' })
 const route = useRoute()
 const router = useRouter()
 const { capi, tz, link, info } = useChurch()
 const toast = useToast()
 
-const tab = computed({
-  get: () => (route.query.status ? 'saida' : String(route.query.aba ?? 'lembretes')),
-  set: (v: string) => router.replace({ query: { aba: v } }),
-})
-const statusFilter = computed(() => (typeof route.query.status === 'string' ? route.query.status : ''))
-
-interface Preview {
-  enabled: boolean
-  nextRunAt: string
-  windowStart: string
-  windowEnd: string
-  channel: { mode: string, canSendReal: boolean }
-  recipients: { personId: string, displayName: string, taskCount: number, pending: string | null, message: string }[]
-}
 interface Run {
   id: string
   scheduledFor: string
-  windowStart: string
-  windowEnd: string
-  trigger: string
-  status: string
   stats: { recipients?: number, queued?: number, blocked?: number }
-  deliveries: { id: string, personName: string, seq: number, kind: string, createdAt: string, messageStatus: string | null, blockedReason: string | null, lastError: string | null, messageId: string | null }[]
+  deliveries: { id: string, kind: string, messageStatus: string | null, blockedReason: string | null }[]
 }
-const { data: rem, refresh: refreshRem } = await useAsyncData(`reminders-${route.params.slug}`, () => capi<{ preview: Preview, runs: Run[] }>('/reminders'))
-const { data: out, refresh: refreshOut } = await useAsyncData(() => `outbox-${route.params.slug}-${statusFilter.value}`, () => capi<{ counts: Record<string, number>, messages: MessageRow[] }>(`/messages${statusFilter.value ? `?status=${statusFilter.value}` : ''}`), { watch: [statusFilter] })
+const { data: out, refresh } = await useAsyncData(`outbox-${route.params.slug}`, () => capi<{ counts: Record<string, number>, messages: MessageRow[] }>('/messages?limit=200'))
+const { data: rem } = await useAsyncData(`reminders-${route.params.slug}`, () => capi<{ runs: Run[] }>('/reminders'))
 
-const problemCount = computed(() => (out.value?.counts.failed ?? 0) + (out.value?.counts.unknown ?? 0))
-const sample = ref<string | null>(null)
-const sampleOpen = computed({ get: () => sample.value !== null, set: (v) => { if (!v) sample.value = null } })
-const PENDING: Record<string, string> = { no_phone: 'sem telefone', no_consent: 'sem autorização de WhatsApp' }
-const KIND: Record<string, string> = { reminder: 'lembrete', correction: 'correção', silent: 'atualização silenciosa (recusa da própria pessoa)' }
+const filter = computed({
+  get: () => (typeof route.query.estado === 'string' && route.query.estado in MESSAGE_TINT ? route.query.estado : 'todas'),
+  set: (v: string) => router.replace({ query: v === 'todas' ? {} : { estado: v } }),
+})
+const rows = computed(() => (out.value?.messages ?? []).map((m) => ({ ...m, tint: messageTint(m.status) })))
+const filters = computed(() => [
+  { key: 'todas', label: 'Todas', n: rows.value.length },
+  ...Object.entries(MESSAGE_TINT).map(([key, t]) => ({ key, label: t.label, n: rows.value.filter((r) => r.tint.key === key).length })),
+])
+const list = computed(() => (filter.value === 'todas' ? rows.value : rows.value.filter((r) => r.tint.key === filter.value)))
 
-async function resend(m: MessageRow) {
+// Só volta à fila o que não chegou (ou pode não ter chegado); reenviar o que já foi
+// entregue duplicaria a mensagem.
+const RETRY = ['blocked', 'failed', 'unknown']
+async function retry(m: MessageRow) {
   try {
     await capi(`/messages/${m.id}/resend`, { method: 'POST' })
-    toast.ok(m.status === 'unknown' ? 'Mensagem de volta à fila. Confira antes se ela não chegou.' : 'Mensagem de volta à fila.')
-    await Promise.all([refreshOut(), refreshRem()])
+    toast.ok(m.status === 'unknown' ? 'De volta à fila. Confira antes se ela não chegou.' : 'Mensagem de volta à fila.')
+    await refresh()
   } catch (e) {
     toast.error(e)
   }
 }
-const simText = ref<string | null>(null)
-const simOpen = computed({ get: () => simText.value !== null, set: (v) => { if (!v) simText.value = null } })
-async function showSim(m: MessageRow) {
+
+const sim = ref<{ m: MessageRow, body: string, link: string | null } | null>(null)
+const simOpen = computed({ get: () => sim.value !== null, set: (v) => { if (!v) sim.value = null } })
+async function openSim(m: MessageRow) {
   try {
-    simText.value = (await capi<{ body: string }>(`/messages/${m.id}/simulated`)).body
+    const { body } = await capi<{ body: string }>(`/messages/${m.id}/simulated`)
+    sim.value = { m, body, link: body.match(/https?:\/\/\S+/)?.[0] ?? null }
   } catch (e) {
     toast.error(e)
   }
 }
-function setStatus(v: string) {
-  router.replace({ query: v ? { status: v } : { aba: 'saida' } })
-}
-const FILTERS = [
-  { v: '', l: 'Todas' },
-  { v: 'blocked', l: 'Não enviadas' },
-  { v: 'failed,unknown', l: 'Com falha' },
-  { v: 'queued,sending', l: 'Na fila' },
-  { v: 'sent,delivered,read', l: 'Enviadas' },
-  { v: 'simulated', l: 'Simuladas' },
-]
+
+const reminderLine = computed(() => {
+  const c = info.value?.church
+  if (!c) return ''
+  if (!c.reminderEnabled) return 'O lembrete semanal está desligado. Uma mensagem por pessoa, quando ligado.'
+  return `Toda ${WEEKDAYS[c.reminderWeekday]!.replace('-feira', '')}, ${hhmm(c.reminderTime)}. Uma mensagem por pessoa.`
+})
+const runs = computed(() => (rem.value?.runs ?? []).map((r) => {
+  const ds = r.deliveries.filter((d) => d.kind === 'reminder')
+  const ok = ds.filter((d) => ['sent', 'delivered', 'read', 'simulated', 'queued', 'sending'].includes(d.messageStatus ?? '')).length
+  const failed = ds.filter((d) => ['failed', 'unknown'].includes(d.messageStatus ?? '')).length
+  const skipped = ds.filter((d) => d.blockedReason).length
+  const simulated = ds.some((d) => d.messageStatus === 'simulated')
+  let summary = `${ok} de ${ds.length} enviadas`
+  if (failed) summary += `, ${plural(failed, 'falha', 'falhas')}`
+  if (skipped) summary += `, ${skipped} sem autorização`
+  return { id: r.id, when: stamp(r.scheduledFor, tz.value), summary, tag: simulated ? 'simulação' : ds.length ? 'oficial' : 'sem envios', sim: simulated }
+}))
 </script>
 
 <template>
-  <div class="page page--wide">
-    <NuxtLink
-      :to="`/i/${$route.params.slug}/coordenacao/configuracoes`"
-      class="back"
+  <div class="stack-lg w-760">
+    <PageHead
+      title="Mensagens enviadas"
+      lede="Tudo que saiu — ou tentou sair — pelo WhatsApp da igreja."
+      :back="link('/coordenacao/configuracoes')"
+      back-label="Configurações"
+    />
+
+    <div
+      v-if="info?.whatsappMode === 'simulation'"
+      class="panel panel--wait small"
     >
-      <Icon
-        name="arrow-left"
-        :weight="2"
-      />Configurações
-    </NuxtLink>
-    <div class="page-head">
-      <p class="kicker">
-        Comunicação
-      </p>
-      <h1>Mensagens</h1>
-      <p class="lede">
-        Tudo que a Guilda enviou ou tentou enviar pelo WhatsApp, com o motivo quando algo não saiu.
-      </p>
-      <div
-        v-if="info?.whatsappMode === 'simulation'"
-        class="notice notice--wait"
-        style="margin-top:1rem"
-      >
-        <p><strong>Modo de simulação.</strong> As mensagens aparecem como “Simulada — não enviada”: ninguém recebe nada. <NuxtLink :to="link('/coordenacao/whatsapp')">Ver o que falta para o canal oficial</NuxtLink>.</p>
-      </div>
+      <strong>Modo de simulação.</strong> Nada saiu de verdade: cada mensagem fica aqui para você conferir.
+      <NuxtLink :to="link('/coordenacao/whatsapp')">Canal do WhatsApp</NuxtLink>
     </div>
 
     <div
-      class="row"
-      role="tablist"
-      aria-label="Seções"
-      style="gap:.25rem;margin-bottom:1.5rem;border-bottom:1px solid var(--rule);padding-bottom:.5rem"
+      class="chips"
+      role="group"
+      aria-label="Filtrar por estado"
     >
       <button
-        role="tab"
+        v-for="f in filters"
+        :key="f.key"
         type="button"
-        class="btn btn--small"
-        :class="{ 'btn--primary': tab === 'lembretes' }"
-        :aria-selected="tab === 'lembretes'"
-        @click="tab = 'lembretes'"
+        class="chip chip--dark"
+        :aria-pressed="filter === f.key"
+        @click="filter = f.key"
       >
-        Lembrete semanal
-      </button>
-      <button
-        role="tab"
-        type="button"
-        class="btn btn--small"
-        :class="{ 'btn--primary': tab === 'saida' }"
-        :aria-selected="tab === 'saida'"
-        @click="tab = 'saida'"
-      >
-        Todas as mensagens
-        <span
-          v-if="problemCount"
-          class="badge-count"
-        >{{ problemCount }}</span>
+        {{ f.label }} <span style="opacity:.7">{{ f.n }}</span>
       </button>
     </div>
 
-    <!-- Lembretes -->
-    <template v-if="tab === 'lembretes' && rem">
-      <section>
-        <div class="section-head">
-          <h2>Próximo lembrete</h2>
-          <NuxtLink
-            class="small"
-            :to="link('/coordenacao/configuracoes')"
-          >Mudar dia e horário</NuxtLink>
-        </div>
-        <p
-          v-if="!rem.preview.enabled"
-          class="notice notice--wait"
-          style="margin-top:.75rem"
-        >
-          O lembrete semanal está desligado. <NuxtLink :to="link('/coordenacao/configuracoes')">Ligar</NuxtLink>
-        </p>
-        <p style="margin-top:.75rem;font-size:1.1rem">
-          <strong>{{ longDate(rem.preview.nextRunAt, tz) }}, às {{ time(rem.preview.nextRunAt, tz) }}</strong>,
-          com as tarefas até {{ longDate(rem.preview.windowEnd, tz) }}.
-        </p>
-        <p class="ink-2">
-          {{ plural(rem.preview.recipients.length, 'pessoa escalada', 'pessoas escaladas') }} na janela ·
-          {{ rem.preview.recipients.filter((r) => !r.pending).length }} receberão ·
-          <strong :style="rem.preview.recipients.some((r) => r.pending) ? 'color:var(--wait)' : ''">{{ rem.preview.recipients.filter((r) => r.pending).length }} ficam de fora</strong>
-        </p>
-        <ul
-          class="lines"
-          style="margin-top:1rem"
-        >
-          <li
-            v-for="r in rem.preview.recipients"
-            :key="r.personId"
-            class="line"
-          >
-            <span class="line__main">
-              <span class="line__title">{{ r.displayName }}</span>
-              <span class="line__sub"> · {{ plural(r.taskCount, 'tarefa', 'tarefas') }}</span>
-              <span
-                v-if="r.pending"
-                class="tag tag--wait"
-                style="margin-left:.4rem"
-              >{{ PENDING[r.pending] }}</span>
-            </span>
-            <button
-              type="button"
-              class="btn btn--quiet btn--small"
-              @click="sample = r.message"
-            >
-              Ver mensagem
-            </button>
-          </li>
-          <li
-            v-if="!rem.preview.recipients.length"
-            class="muted"
-          >
-            Ninguém escalado (em escala publicada) nessa janela.
-          </li>
-        </ul>
-      </section>
-
-      <section class="section">
-        <div class="section-head">
-          <h2>Envios anteriores</h2>
-        </div>
-        <EmptyState
-          v-if="!rem.runs.length"
-          title="Nenhum lembrete enviado ainda"
-          text="O trabalhador cria o envio no dia e horário configurados. Repetir o processamento não duplica mensagens."
-        />
-        <details
-          v-for="run in rem.runs"
-          :key="run.id"
-          style="border-bottom:1px solid var(--rule);padding:.85rem 0"
-        >
-          <summary style="cursor:pointer">
-            <strong>{{ longDate(run.scheduledFor, tz) }}, {{ time(run.scheduledFor, tz) }}</strong>
-            <span class="ink-2"> · {{ plural(run.stats.recipients ?? 0, 'pessoa', 'pessoas') }}{{ run.stats.blocked ? `, ${run.stats.blocked} de fora` : '' }}{{ run.deliveries.some((d) => d.kind === 'correction') ? ` · ${plural(run.deliveries.filter((d) => d.kind === 'correction').length, 'correção', 'correções')}` : '' }}</span>
-          </summary>
-          <table
-            class="table small"
-            style="margin-top:.5rem"
-          >
-            <thead>
-              <tr>
-                <th scope="col">
-                  Pessoa
-                </th><th scope="col">
-                  Tipo
-                </th><th scope="col">
-                  Quando
-                </th><th scope="col">
-                  Estado
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="d in run.deliveries"
-                :key="d.id"
-              >
-                <th
-                  scope="row"
-                  style="font-weight:600"
-                >
-                  {{ d.personName }}
-                </th>
-                <td>{{ KIND[d.kind] ?? d.kind }}</td>
-                <td>{{ dateTime(d.createdAt, tz) }}</td>
-                <td>
-                  <MessageStatus
-                    v-if="d.messageStatus"
-                    :status="d.messageStatus"
-                  /> <span
-                    v-if="d.blockedReason"
-                    class="muted"
-                  >{{ PENDING[d.blockedReason] ?? d.blockedReason }}</span><span
-                    v-if="d.lastError"
-                    style="color:var(--no)"
-                  > {{ d.lastError }}</span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </details>
-      </section>
-    </template>
-
-    <!-- Caixa de saída -->
-    <template v-if="tab === 'saida' && out">
+    <div class="card card--flush rows">
       <div
-        class="row"
-        role="group"
-        aria-label="Filtrar por estado"
-        style="gap:.25rem;margin-bottom:1rem"
+        v-for="m in list"
+        :key="m.id"
+        class="rowline"
       >
-        <button
-          v-for="f in FILTERS"
-          :key="f.v"
-          type="button"
-          class="btn btn--small"
-          :class="{ 'btn--primary': statusFilter === f.v }"
-          :aria-pressed="statusFilter === f.v"
-          @click="setStatus(f.v)"
-        >
-          {{ f.l }}
-        </button>
-      </div>
-      <EmptyState
-        v-if="!out.messages.length"
-        title="Nenhuma mensagem aqui"
-      />
-      <ul
-        v-else
-        class="lines"
-      >
-        <li
-          v-for="m in out.messages"
-          :key="m.id"
-        >
-          <div class="line">
-            <span class="line__main">
-              <span class="line__title">{{ m.kindLabel }}</span>
-              <span class="line__sub"> · {{ m.personName ?? '—' }}{{ m.toPhoneLast4 ? ` (final ${m.toPhoneLast4})` : '' }} · {{ dateTime(m.createdAt, tz) }}</span>
-            </span>
-            <MessageStatus :status="m.status" />
-          </div>
-          <p
-            class="small ink-2"
-            style="margin-top:.35rem"
-          >
-            {{ m.preview }}
-          </p>
-          <p
-            v-if="m.blockedReasonText"
-            class="small"
-            style="margin-top:.25rem;color:var(--wait)"
-          >
-            {{ m.blockedReasonText }}
-          </p>
-          <p
-            v-if="m.lastError"
-            class="small"
-            style="margin-top:.25rem;color:var(--no)"
-          >
-            {{ m.lastError }}{{ m.attempts > 1 ? ` (${m.attempts} tentativas)` : '' }}
-          </p>
-          <p
-            v-if="m.deliveredAt || m.readAt"
-            class="small muted"
-          >
-            {{ m.readAt ? `Lida em ${dateTime(m.readAt, tz)}` : `Entregue em ${dateTime(m.deliveredAt!, tz)}` }}
-          </p>
-          <div
-            v-if="['blocked', 'failed', 'unknown'].includes(m.status) || m.status === 'simulated'"
+        <span
+          class="av"
+          style="width:40px;height:40px"
+          aria-hidden="true"
+        >{{ initials(m.personName ?? '?') }}</span>
+        <span style="flex:1;min-width:180px">
+          <span
             class="row"
-            style="margin-top:.5rem"
+            style="gap:8px"
           >
-            <button
-              v-if="['blocked', 'failed', 'unknown'].includes(m.status)"
-              type="button"
-              class="btn btn--small"
-              @click="resend(m)"
-            >
-              {{ m.status === 'blocked' ? 'Tentar de novo' : 'Reenviar' }}
-            </button>
-            <button
-              v-if="m.status === 'simulated'"
-              type="button"
-              class="btn btn--quiet btn--small"
-              @click="showSim(m)"
-            >
-              Ver texto completo
-            </button>
-          </div>
-        </li>
-      </ul>
-    </template>
-
-    <Sheet
-      v-model:open="sampleOpen"
-      title="Prévia da mensagem"
-    >
-      <p style="white-space:pre-line">
-        {{ sample }}
-      </p>
+            <span class="strong">{{ m.personName ?? 'Sem pessoa' }}</span>
+            <span
+              class="stag"
+              :style="{ background: m.tint.bg, color: m.tint.fg }"
+            >{{ m.tint.label }}</span>
+          </span>
+          <span
+            class="soft"
+            style="display:block;font-size:13.5px"
+          >{{ m.kindLabel }} · {{ stamp(m.createdAt, tz) }}</span>
+          <span
+            v-if="m.blockedReasonText || m.lastError"
+            class="amber"
+            style="display:block;font-size:13.5px;margin-top:2px"
+          >{{ m.blockedReasonText ?? m.lastError }}</span>
+        </span>
+        <span
+          class="row"
+          style="gap:6px"
+        >
+          <button
+            v-if="RETRY.includes(m.status)"
+            type="button"
+            class="btn btn--line btn--xs"
+            @click="retry(m)"
+          >
+            Tentar de novo
+          </button>
+          <button
+            v-if="m.status === 'simulated'"
+            type="button"
+            class="link"
+            style="font-size:13.5px"
+            @click="openSim(m)"
+          >
+            Ver mensagem simulada
+          </button>
+        </span>
+      </div>
       <p
-        class="small muted"
-        style="margin-top:1rem"
+        v-if="!list.length"
+        class="muted"
+        style="padding:22px 16px;text-align:center"
       >
-        O texto final segue o modelo aprovado na Meta. O link individual só aparece na mensagem enviada.
+        {{ rows.length ? 'Nenhuma mensagem com esse status.' : 'Nenhuma mensagem ainda.' }}
       </p>
-    </Sheet>
-    <Sheet
-      v-model:open="simOpen"
-      title="Mensagem simulada"
-    >
-      <p class="tag tag--sim">
-        Simulação — não foi enviada
+    </div>
+
+    <div class="card">
+      <h2 style="font-size:18px">
+        Lembretes semanais
+      </h2>
+      <p
+        class="soft"
+        style="margin:2px 0 8px;font-size:14px"
+      >
+        {{ reminderLine }}
       </p>
-      <p style="margin-top:1rem;white-space:pre-line;word-break:break-word">
-        {{ simText }}
+      <div
+        v-for="r in runs"
+        :key="r.id"
+        class="row"
+        style="gap:10px;padding:10px 0;border-top:1px solid var(--line-2)"
+      >
+        <span
+          class="strong"
+          style="min-width:140px;font-weight:700"
+        >{{ r.when }}</span>
+        <span
+          class="soft"
+          style="flex:1;min-width:160px;font-size:14px"
+        >{{ r.summary }}</span>
+        <span
+          class="stag"
+          :style="r.sim ? { background: '#efe6fb', color: '#5b3aa6' } : { background: '#e3f3e8', color: '#155f30' }"
+        >{{ r.tag }}</span>
+      </div>
+      <p
+        v-if="!runs.length"
+        class="muted small"
+        style="padding-top:6px"
+      >
+        Nenhum lembrete saiu ainda.
       </p>
+    </div>
+
+    <Sheet v-model:open="simOpen">
+      <template
+        v-if="sim"
+        #head
+      >
+        <p class="caps">
+          Mensagem simulada
+        </p>
+        <h2
+          class="sheet__title"
+          style="margin-top:2px"
+        >
+          Para {{ sim.m.personName ?? 'sem pessoa' }}
+        </h2>
+        <p class="sheet__lede">
+          {{ sim.m.kindLabel }} · {{ stamp(sim.m.createdAt, tz) }} · nada saiu de verdade
+        </p>
+      </template>
+      <template v-if="sim">
+        <div
+          class="bubble"
+          style="background:#e7f6e4;border-radius:18px 18px 18px 4px;font-size:15.5px;max-width:none;white-space:pre-line;word-break:break-word"
+        >
+          {{ sim.body }}
+        </div>
+        <div
+          v-if="sim.link"
+          class="row"
+          style="margin-top:12px;gap:8px;background:var(--surface-2);border-radius:12px;padding:10px 12px"
+        >
+          <span
+            class="soft"
+            style="font-size:13.5px"
+          >Link dentro da mensagem</span>
+          <a
+            :href="sim.link"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="strong"
+            style="color:var(--accent-deep);word-break:break-all"
+          >{{ sim.link }}</a>
+        </div>
+      </template>
     </Sheet>
   </div>
 </template>

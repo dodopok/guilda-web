@@ -24,6 +24,7 @@ export const createChurchSchema = z.object({
   slug: z.string().trim().toLowerCase().regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, 'Use letras minúsculas, números e hífens.').min(2).max(60),
   timezone: timezoneSchema.default('America/Sao_Paulo'),
   defaultLocation: z.string().trim().max(200).optional(),
+  city: z.string().trim().max(80).optional(),
   // Primeira pessoa da coordenação, que receberá convite.
   coordinator: z.object({
     displayName: z.string().trim().min(2).max(120),
@@ -43,6 +44,7 @@ export async function createChurch(db: Db, actor: Actor, input: z.infer<typeof c
       slug: input.slug,
       timezone: input.timezone,
       defaultLocation: input.defaultLocation ?? null,
+      city: input.city || null,
     }).returning()
     await tx.insert(whatsappChannels).values({ churchId: church!.id, mode: 'disabled' })
     // Se o próprio administrador for a coordenação, vincula a conta existente.
@@ -75,6 +77,7 @@ export const updateChurchSchema = z.object({
   name: z.string().trim().min(2).max(120).optional(),
   timezone: timezoneSchema.optional(),
   defaultLocation: z.string().trim().max(200).nullable().optional(),
+  city: z.string().trim().max(80).nullable().optional(),
   reminderEnabled: z.boolean().optional(),
   reminderWeekday: z.number().int().min(0).max(6).optional(),
   reminderTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use HH:MM.').optional(),
@@ -103,6 +106,7 @@ export function publicChurch(church: typeof churches.$inferSelect) {
     name: church.name,
     timezone: church.timezone,
     defaultLocation: church.defaultLocation,
+    city: church.city,
     reminderEnabled: church.reminderEnabled,
     reminderWeekday: church.reminderWeekday,
     reminderTime: church.reminderTime,

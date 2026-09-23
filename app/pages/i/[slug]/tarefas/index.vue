@@ -4,59 +4,80 @@ import type { Task } from '~/types'
 useHead({ title: 'Suas escalas' })
 const route = useRoute()
 const { capi, tz, link } = useChurch()
-const { data } = await useAsyncData(`tasks-${route.params.slug}`, () => capi<{ tasks: Task[] }>('/me/tasks'))
-const groups = computed(() => {
-  const map = new Map<string, Task[]>()
-  for (const t of data.value?.tasks ?? []) map.set(t.service.id, [...(map.get(t.service.id) ?? []), t])
-  return [...map.values()]
-})
-const STATUS: Record<string, string> = { pending: 'A confirmar', confirmed: 'Confirmado', declined: 'Não pode' }
+const { data } = await useAsyncData(`my-tasks-${route.params.slug}`, () => capi<{ tasks: Task[] }>('/me/tasks?past=1'))
+const now = Date.now()
+const upcoming = computed(() => (data.value?.tasks ?? []).filter((t) => new Date(t.service.startsAt).getTime() >= now))
+const past = computed(() => (data.value?.tasks ?? []).filter((t) => new Date(t.service.startsAt).getTime() < now).reverse())
+const groups = computed(() => [{ label: 'Próximas', items: upcoming.value, past: false }, { label: 'Já passaram', items: past.value, past: true }].filter((g) => g.items.length))
+const tag = (t: Task, isPast: boolean) => TASK_TAG[isPast ? 'past' : t.status]!
+function sub(t: Task) {
+  const d = `${weekdayLong(t.service.startsAt, tz.value)}, ${time(t.service.startsAt, tz.value)}`
+  return t.arrivalAt ? `${d} · chegue às ${time(t.arrivalAt, tz.value)}` : d
+}
 </script>
 
 <template>
   <section class="stack-lg w-640">
-    <BackLink
-      :to="link('')"
-      label="Início"
+    <PageHead
+      title="Suas escalas"
+      :lede="upcoming.length ? `Você tem ${plural(upcoming.length, 'tarefa marcada', 'tarefas marcadas')}. Toque para ver os detalhes.` : 'Nada marcado por enquanto.'"
+      :back="link('/perfil')"
+      back-label="Você"
     />
-    <h1 class="h1--sm">
-      Suas escalas
-    </h1>
     <div
-      v-if="!groups.length"
-      class="card--dashed"
+      v-for="g in groups"
+      :key="g.label"
     >
       <p
-        class="strong"
-        style="font-size:18px"
+        class="caps"
+        style="margin-bottom:8px"
       >
-        Nenhuma escala com seu nome por enquanto
+        {{ g.label }}
       </p>
+      <div class="card card--flush rows">
+        <NuxtLink
+          v-for="t in g.items"
+          :key="t.assignmentId"
+          :to="link(`/tarefas/${t.assignmentId}`)"
+          class="listrow"
+        >
+          <span
+            style="width:44px;text-align:center;flex:none"
+            aria-hidden="true"
+          >
+            <span
+              class="muted"
+              style="display:block;font-size:11px;font-weight:800;text-transform:uppercase"
+            >{{ weekdayShort(t.service.startsAt, tz) }}</span>
+            <span style="display:block;font-size:20px;font-weight:800;line-height:1">{{ dayNumber(t.service.startsAt, tz) }}</span>
+          </span>
+          <span style="flex:1;min-width:0">
+            <span
+              class="strong"
+              style="display:block"
+            >{{ t.duty.name }}<span class="sr-only">, {{ longDate(t.service.startsAt, tz) }}</span></span>
+            <span
+              class="soft"
+              style="display:block;font-size:13.5px"
+            >{{ sub(t) }}</span>
+          </span>
+          <span
+            class="stag"
+            :style="{ background: tag(t, g.past).bg, color: tag(t, g.past).fg }"
+          >{{ tag(t, g.past).label }}</span>
+          <Icon
+            name="chevron-right"
+            class="listrow__chev"
+          />
+        </NuxtLink>
+      </div>
     </div>
-    <div class="stack-sm">
-      <NuxtLink
-        v-for="g in groups"
-        :key="g[0]!.service.id"
-        :to="link(`/tarefas/${g[0]!.assignmentId}`)"
-        class="card row"
-        style="flex-wrap:nowrap;gap:14px;text-decoration:none;color:inherit"
-      >
-        <DateTile
-          :date="g[0]!.service.startsAt"
-          :tz="tz"
-        />
-        <span class="grow"><span
-          class="strong"
-          style="display:block"
-        >{{ g.map((t) => t.duty.name).join(' · ') }}</span><span
-          class="soft small"
-          style="display:block"
-        >{{ g[0]!.service.title }} · {{ time(g[0]!.service.startsAt, tz) }}</span></span>
-        <span
-          class="status"
-          :class="`status--${g[0]!.status}`"
-        >{{ STATUS[g[0]!.status] }}</span>
-      </NuxtLink>
+    <div
+      v-if="!groups.length"
+      class="card--dashed soft"
+      style="padding:24px 20px"
+    >
+      Nenhuma escala com seu nome ainda.
     </div>
   </section>
 </template>

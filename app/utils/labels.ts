@@ -56,3 +56,41 @@ export function liturgicalKey(color?: string | null) {
 export function plural(n: number, one: string, many: string) {
   return `${n} ${n === 1 ? one : many}`
 }
+
+// Cores dos estados de mensagem (fundo, texto), iguais às do layout.
+export const MESSAGE_TINT: Record<string, { label: string, bg: string, fg: string, statuses: string[] }> = {
+  blocked: { label: 'Não enviada', bg: '#f0efe9', fg: '#4a5450', statuses: ['blocked', 'cancelled'] },
+  queued: { label: 'Na fila', bg: '#e3ebf8', fg: '#2f5fa8', statuses: ['queued', 'sending'] },
+  failed: { label: 'Falhou', bg: '#fde4e0', fg: '#8f2a1e', statuses: ['failed'] },
+  unknown: { label: 'Incerta', bg: '#fff1d6', fg: '#a86400', statuses: ['unknown'] },
+  simulated: { label: 'Simulada', bg: '#efe6fb', fg: '#5b3aa6', statuses: ['simulated'] },
+  sent: { label: 'Enviada', bg: '#e3f3e8', fg: '#155f30', statuses: ['sent'] },
+  delivered: { label: 'Entregue', bg: '#e3f3e8', fg: '#155f30', statuses: ['delivered'] },
+  read: { label: 'Lida', bg: '#d4ecdb', fg: '#0f4d26', statuses: ['read'] },
+}
+export function messageTint(status: string) {
+  const key = Object.keys(MESSAGE_TINT).find((k) => MESSAGE_TINT[k]!.statuses.includes(status)) ?? 'blocked'
+  return { key, ...MESSAGE_TINT[key]! }
+}
+
+// Blocos de liturgia: cor da etiqueta, frase curta e origem padrão do texto.
+export const BLOCK_KINDS: Record<string, { label: string, sub: string, bg: string, fg: string, source: string }> = {
+  heading: { label: 'Título', sub: 'Separa partes do culto', bg: '#1d221f', fg: '#fff', source: 'church' },
+  rite: { label: 'Rito', sub: 'Texto fixo do LOC', bg: '#f0efe9', fg: '#4a5450', source: 'loc_manual' },
+  collect: { label: 'Coleta', sub: 'Vem do Estêvão', bg: '#e3ebf8', fg: '#2f5fa8', source: 'estevao' },
+  reading: { label: 'Leitura', sub: 'Vem do Estêvão', bg: '#e3ebf8', fg: '#2f5fa8', source: 'estevao' },
+  psalm: { label: 'Salmo', sub: 'Vem do Estêvão', bg: '#e3ebf8', fg: '#2f5fa8', source: 'estevao' },
+  sermon: { label: 'Sermão', sub: 'Quem prega escolhe o texto', bg: '#fff1d6', fg: '#a86400', source: 'church' },
+  music: { label: 'Músicas', sub: 'Do repertório', bg: '#efe6fb', fg: '#5b3aa6', source: 'church' },
+  announcements: { label: 'Avisos', sub: 'Fixos e do período', bg: '#fde4e0', fg: '#8f2a1e', source: 'church' },
+  text: { label: 'Texto livre', sub: 'O que precisar', bg: '#f0efe9', fg: '#4a5450', source: 'church' },
+}
+export const SOURCE_SHORT: Record<string, string> = { church: 'Texto da igreja', loc_manual: 'LOC digitado', estevao: 'Estêvão' }
+export const TEMPLATE_KIND: Record<string, string> = { regular: 'Comum', special: 'Especial', short: 'Curto' }
+
+export const TASK_TAG: Record<string, { label: string, bg: string, fg: string }> = {
+  pending: { label: 'confirmar', bg: '#fff1d6', fg: '#a86400' },
+  confirmed: { label: 'confirmado', bg: '#e3f3e8', fg: '#155f30' },
+  declined: { label: 'não pode', bg: '#fde4e0', fg: '#8f2a1e' },
+  past: { label: 'feito', bg: '#f0efe9', fg: '#4a5450' },
+}

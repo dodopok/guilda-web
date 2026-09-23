@@ -4,18 +4,24 @@ import type { Task } from '~/types'
 useHead({ title: 'Tarefa' })
 const route = useRoute()
 const id = String(route.params.id)
-const { capi, tz, link } = useChurch()
+const { capi, tz, link, info } = useChurch()
 const toast = useToast()
+interface Candidate { personId: string, displayName: string, available: boolean, problems: string[], monthTasks: number, month: string }
 const { data, refresh } = await useAsyncData(`task-${id}`, async () => {
   const [tasks, candidates, history] = await Promise.all([
-    capi<{ tasks: Task[] }>('/me/tasks'),
-    capi<{ candidates: { personId: string, displayName: string, available: boolean, problems: string[] }[] }>(`/assignments/${id}/candidates`).catch(() => ({ candidates: [] })),
+    capi<{ tasks: Task[] }>('/me/tasks?past=1'),
+    capi<{ candidates: Candidate[] }>(`/assignments/${id}/candidates`).catch(() => ({ candidates: [] as Candidate[] })),
     capi<{ responses: { decision: string, channel: string, note: string | null, createdAt: string, personName: string }[] }>(`/assignments/${id}/history`).catch(() => ({ responses: [] })),
   ])
   return { task: tasks.tasks.find((t) => t.assignmentId === id) ?? null, candidates: candidates.candidates, history: history.responses }
 })
 const { respond, busy } = useRespond(refresh)
 const task = computed(() => data.value?.task ?? null)
+const isPast = computed(() => (task.value ? new Date(task.value.service.startsAt).getTime() < Date.now() : false))
+const openSwap = computed(() => task.value?.openSwaps[0] ?? null)
+const location = computed(() => task.value?.service.location ?? info.value?.church.defaultLocation ?? null)
+const dateLabel = computed(() => (task.value ? `${longDate(task.value.service.startsAt, tz.value)} · ${time(task.value.service.startsAt, tz.value)}` : ''))
+
 const declining = ref<Task | null>(null)
 async function decline(note: string) {
   if (!declining.value) return
@@ -23,20 +29,26 @@ async function decline(note: string) {
   declining.value = null
 }
 
+// Pedir para alguém assumir
+const handoff = ref(false)
 const chosen = ref<string | null>(null)
-const message = ref('')
+const note = ref('')
 const sending = ref(false)
 const available = computed(() => (data.value?.candidates ?? []).filter((c) => c.available))
-const unavailable = computed(() => (data.value?.candidates ?? []).filter((c) => !c.available))
+const chosenName = computed(() => available.value.find((c) => c.personId === chosen.value)?.displayName ?? '')
+function candSub(c: Candidate) {
+  const m = monthName(c.month).toLowerCase()
+  return c.monthTasks ? plural(c.monthTasks, `tarefa em ${m}`, `tarefas em ${m}`) : `Ainda sem tarefa em ${m}`
+}
 async function propose() {
   if (!chosen.value) return
   sending.value = true
   try {
-    await capi(`/assignments/${id}/swaps`, { method: 'POST', body: { candidatePersonId: chosen.value, message: message.value || null } })
-    const name = data.value?.candidates.find((c) => c.personId === chosen.value)?.displayName
-    toast.ok(`Pedido enviado para ${name}. A troca vale quando a pessoa aceitar.`)
+    await capi(`/assignments/${id}/swaps`, { method: 'POST', body: { candidatePersonId: chosen.value, message: note.value || null } })
+    toast.ok(`Pedido enviado para ${chosenName.value}. A troca vale quando a pessoa aceitar.`)
+    handoff.value = false
     chosen.value = null
-    message.value = ''
+    note.value = ''
     await refresh()
   } catch (e) {
     toast.error(e)
@@ -47,259 +59,298 @@ async function propose() {
 async function cancelSwap(swapId: string) {
   try {
     await capi(`/swaps/${swapId}/cancel`, { method: 'POST' })
-    toast.ok('Pedido de troca cancelado.')
+    toast.ok('Pedido cancelado.')
     await refresh()
   } catch (e) {
     toast.error(e)
   }
 }
-const CHANNEL: Record<string, string> = { app: 'pelo app', coordination: 'registrado pela coordenação', whatsapp: 'pelo WhatsApp' }
+
+const CHANNEL: Record<string, string> = { app: 'pelo app', coordination: 'pela coordenação', whatsapp: 'pelo WhatsApp' }
+const history = computed(() => {
+  const items = (data.value?.history ?? []).map((h) => ({
+    text: `${h.personName} ${h.decision === 'confirmed' ? 'confirmou' : 'avisou que não pode'} ${CHANNEL[h.channel] ?? ''}`.trim() + (h.note ? ` — “${h.note}”` : ''),
+    when: shortDate(h.createdAt, tz.value),
+    at: h.createdAt,
+    dot: h.decision === 'confirmed' ? 'var(--ok)' : 'var(--no)',
+  }))
+  for (const s of task.value?.openSwaps ?? []) items.push({ text: `Você pediu a ${s.candidateName} para assumir`, when: shortDate(s.createdAt, tz.value), at: s.createdAt, dot: '#2f5fa8' })
+  return items.sort((a, b) => a.at.localeCompare(b.at))
+})
 </script>
 
 <template>
-  <section class="stack-lg w-640">
-    <BackLink
-      :to="link('')"
-      label="Início"
-    />
-    <div
-      v-if="!task"
-      class="card--dashed"
-    >
-      <p
-        class="strong"
-        style="font-size:18px"
-      >
-        Tarefa não encontrada
-      </p>
-      <p
-        class="soft"
-        style="margin:6px auto 0;max-width:380px"
-      >
-        Ela pode ter passado, sido trocada ou retirada da escala.
-      </p>
-      <NuxtLink
+  <section class="stack-md w-640">
+    <template v-if="!task">
+      <BackLink
         :to="link('/tarefas')"
-        class="btn btn--secondary btn--md"
-        style="margin-top:16px"
-      >
-        Ver suas escalas
-      </NuxtLink>
-    </div>
+        label="Suas escalas"
+      />
+      <EmptyState
+        title="Tarefa não encontrada"
+        text="Ela pode ter sido trocada ou retirada da escala."
+      />
+    </template>
     <template v-else>
-      <article class="card card--lg card--flush">
-        <div
-          class="row"
-          style="flex-wrap:nowrap;gap:16px;padding:20px;border-bottom:1px solid var(--line-2)"
-        >
-          <DateTile
-            :date="task.service.startsAt"
-            :tz="tz"
-            accent
-            large
-            month
-          />
-          <div class="grow">
-            <h1 style="font-size:22px">
-              {{ task.duty.name }}
-            </h1>
-            <p
-              class="soft"
-              style="margin-top:3px;font-size:15px"
-            >
-              {{ task.service.title }} · {{ longDate(task.service.startsAt, tz) }}, {{ time(task.service.startsAt, tz) }}<template v-if="task.service.location">
-                · {{ task.service.location }}
-              </template>
-            </p>
-          </div>
-        </div>
-        <div style="padding:18px 20px">
-          <span
-            class="status"
-            :class="`status--${task.status}`"
-          >{{ task.status === 'confirmed' ? 'Confirmado' : task.status === 'declined' ? 'Você avisou que não pode' : 'Aguardando sua confirmação' }}</span>
-          <p
-            v-if="task.arrivalAt"
-            style="margin-top:10px"
-          >
-            Chegue às <strong>{{ time(task.arrivalAt, tz) }}</strong>
-          </p>
-          <p
-            v-if="task.duty.instructions"
-            style="margin-top:8px;color:var(--ink-2)"
-          >
-            {{ task.duty.instructions }}
-          </p>
-          <p
-            v-if="task.status === 'pending'"
-            class="small soft"
-            style="margin-top:8px"
-          >
-            Responda até {{ dateTime(task.respondBy, tz) }}.
-          </p>
-          <div
-            v-if="task.status !== 'confirmed'"
-            style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px"
-          >
-            <button
-              type="button"
-              class="btn btn--ok"
-              style="min-height:48px"
-              :disabled="busy === task.assignmentId"
-              @click="respond(task, 'confirmed')"
-            >
-              <Icon
-                name="check"
-                :weight="2.2"
-              />{{ task.status === 'declined' ? 'Posso sim' : 'Confirmar' }}
-            </button>
-            <button
-              v-if="task.status === 'pending'"
-              type="button"
-              class="btn btn--secondary"
-              style="min-height:48px"
-              @click="declining = task"
-            >
-              Não posso
-            </button>
-          </div>
-          <button
-            v-else
-            type="button"
-            class="link"
-            style="margin-top:10px"
-            @click="declining = task"
-          >
-            Imprevisto? Avisar
-          </button>
-        </div>
-      </article>
+      <PageHead
+        :eyebrow="dateLabel"
+        :title="task.duty.name"
+        :lede="`${task.service.title}${location ? ` · ${location}` : ''}`"
+        :back="link('/tarefas')"
+        back-label="Suas escalas"
+      />
 
-      <section
-        id="troca"
-        class="stack-sm"
-      >
-        <div>
-          <h2 class="h3">
-            Pedir para alguém assumir
-          </h2>
-          <p
-            class="soft small"
-            style="margin-top:2px"
-          >
-            Só aparecem pessoas habilitadas para {{ task.duty.name }}. A troca vale quando a pessoa aceitar.
-          </p>
-        </div>
-        <div
-          v-for="s in task.openSwaps"
-          :key="s.id"
-          class="panel panel--soft row"
-        >
-          <p class="grow">
-            Pedido enviado para <strong>{{ s.candidateName }}</strong>.
-          </p>
-          <button
-            type="button"
-            class="link"
-            @click="cancelSwap(s.id)"
-          >
-            Cancelar pedido
-          </button>
-        </div>
-        <div
-          v-if="available.length"
-          class="card card--flush list"
-          role="radiogroup"
-          aria-label="Quem pode assumir"
-        >
-          <button
-            v-for="c in available"
-            :key="c.personId"
-            type="button"
-            class="listrow"
-            role="radio"
-            :aria-checked="chosen === c.personId"
-            :style="chosen === c.personId ? 'background:var(--accent-soft)' : ''"
-            @click="chosen = c.personId"
-          >
-            <span class="av">{{ initials(c.displayName) }}</span>
-            <span class="grow strong">{{ c.displayName }}</span>
-            <Icon
-              v-if="chosen === c.personId"
-              name="check"
-              :weight="2.4"
-              style="width:18px;height:18px;color:var(--accent-deep)"
-            />
-          </button>
-        </div>
+      <div class="card">
         <p
-          v-else
-          class="note"
+          v-if="task.duty.instructions"
+          style="font-size:15.5px;line-height:1.55;color:var(--ink-2)"
         >
-          Ninguém habilitado está livre neste culto. Avise a coordenação pelo botão “Não posso”.
+          {{ task.duty.instructions }}
         </p>
-        <details
-          v-if="unavailable.length"
-          class="small soft"
+        <p
+          v-if="task.arrivalAt"
+          class="row strong"
+          style="gap:8px;margin-top:10px"
         >
-          <summary style="cursor:pointer;font-weight:700">
-            Habilitados que não podem ({{ unavailable.length }})
-          </summary>
-          <p
-            v-for="c in unavailable"
-            :key="c.personId"
-            style="margin-top:6px"
-          >
-            {{ c.displayName }} — {{ c.problems.join(', ') }}
-          </p>
-        </details>
-        <template v-if="chosen">
-          <label class="field">
-            <span class="field__label">Recado <span class="field__opt">(opcional)</span></span>
-            <input
-              v-model="message"
-              class="input"
-              maxlength="300"
-              placeholder="Ex.: vou viajar nesse fim de semana"
-            >
-          </label>
+          <Icon
+            name="clock"
+            :weight="2"
+            style="width:18px;height:18px"
+          />Chegue às {{ time(task.arrivalAt, tz) }}
+        </p>
+        <p
+          v-if="location"
+          class="row soft"
+          style="gap:8px;margin-top:6px"
+        >
+          <Icon
+            name="pin"
+            :weight="2"
+            style="width:18px;height:18px"
+          />{{ location }}
+        </p>
+      </div>
+
+      <div
+        v-if="isPast"
+        class="panel strong"
+        style="background:var(--surface-4);color:#4a5450;padding:12px 14px;border-radius:14px"
+      >
+        Esse culto já passou. Obrigado!
+      </div>
+      <template v-else>
+        <div
+          v-if="task.status === 'pending'"
+          class="row"
+          style="gap:10px"
+        >
           <button
             type="button"
             class="btn"
-            :disabled="sending"
-            @click="propose"
+            style="flex:1"
+            :disabled="busy === task.assignmentId"
+            @click="respond(task, 'confirmed')"
           >
-            Enviar pedido
+            Confirmar
           </button>
-        </template>
-      </section>
-
-      <section
-        v-if="data?.history.length"
-        class="stack-sm"
-      >
-        <p class="section-label">
-          Histórico
-        </p>
-        <div class="card card--flush list">
-          <p
-            v-for="(h, i) in data.history"
-            :key="i"
-            class="small"
-            style="padding:10px 16px"
+          <button
+            type="button"
+            class="btn btn--secondary"
+            style="min-height:50px;font-size:15px"
+            @click="declining = task"
           >
-            {{ dateTime(h.createdAt, tz) }} · {{ h.personName }} {{ h.decision === 'confirmed' ? 'confirmou' : 'avisou que não pode' }} {{ CHANNEL[h.channel] ?? '' }}<template v-if="h.note">
-              — “{{ h.note }}”
-            </template>
-          </p>
+            Não posso
+          </button>
         </div>
-      </section>
+        <div
+          v-else-if="task.status === 'confirmed'"
+          class="row strong"
+          role="status"
+          style="gap:10px;padding:12px 14px;border-radius:14px;background:#e3f3e8;color:#155f30;font-weight:700;flex-wrap:nowrap"
+        >
+          <Icon
+            name="check"
+            :weight="2.6"
+            style="width:18px;height:18px"
+          />
+          <span class="grow">Você confirmou. Obrigado por servir!</span>
+          <button
+            type="button"
+            class="link"
+            style="color:inherit;font-size:13.5px"
+            @click="declining = task"
+          >
+            Imprevisto?
+          </button>
+        </div>
+        <div
+          v-else
+          class="row"
+          role="status"
+          style="gap:10px;padding:12px 14px;border-radius:14px;background:#fff1d6;color:#5c3a00;font-weight:700"
+        >
+          <span class="grow">Você avisou que não pode. A coordenação já sabe.</span>
+          <button
+            type="button"
+            class="link"
+            style="color:inherit;font-size:13.5px"
+            :disabled="busy === task.assignmentId"
+            @click="respond(task, 'confirmed')"
+          >
+            Posso sim
+          </button>
+        </div>
+
+        <div
+          v-if="openSwap"
+          class="row"
+          style="gap:10px;padding:12px 14px;border-radius:14px;background:#e3ebf8;color:#2f5fa8;font-weight:700"
+        >
+          <span class="grow">Você pediu a {{ openSwap.candidateName }} para assumir · aguardando resposta</span>
+          <button
+            type="button"
+            class="link"
+            style="color:inherit;font-size:13.5px"
+            @click="cancelSwap(openSwap.id)"
+          >
+            Cancelar
+          </button>
+        </div>
+        <button
+          v-else-if="task.status !== 'declined'"
+          type="button"
+          class="card row"
+          style="gap:12px;width:100%;text-align:left;color:inherit;flex-wrap:nowrap"
+          @click="handoff = true"
+        >
+          <span
+            class="ticon"
+            style="width:44px;height:44px;border-radius:14px"
+          ><Icon
+            name="swap"
+            :weight="2"
+          /></span>
+          <span style="flex:1">
+            <span
+              class="strong"
+              style="display:block"
+            >Pedir para alguém assumir</span>
+            <span
+              class="soft"
+              style="display:block;font-size:13.5px"
+            >Escolha quem faz {{ task.duty.name }}; a pessoa recebe o pedido.</span>
+          </span>
+          <Icon
+            name="chevron-right"
+            class="listrow__chev"
+          />
+        </button>
+      </template>
+
+      <div class="card">
+        <h2 style="font-size:17px;margin-bottom:6px">
+          Histórico
+        </h2>
+        <div
+          v-for="(h, i) in history"
+          :key="i"
+          class="row"
+          style="gap:10px;padding:8px 0;border-top:1px solid var(--line-2);flex-wrap:nowrap;align-items:flex-start"
+        >
+          <span
+            style="width:8px;height:8px;border-radius:999px;margin-top:7px;flex:none"
+            :style="{ background: h.dot }"
+          />
+          <span style="flex:1;font-size:14.5px">{{ h.text }}</span>
+          <span
+            class="muted"
+            style="font-size:13px;white-space:nowrap"
+          >{{ h.when }}</span>
+        </div>
+        <p
+          v-if="!history.length"
+          class="small muted"
+          style="padding-top:4px"
+        >
+          Nenhuma resposta ainda.
+        </p>
+      </div>
     </template>
+
     <DeclineSheet
       :task="declining"
       :busy="Boolean(busy)"
       @close="declining = null"
       @decline="decline"
     />
+    <Sheet
+      v-model:open="handoff"
+      title="Quem pode assumir?"
+      :lede="task ? `Só quem faz ${task.duty.name} e está livre nesse culto. A pessoa recebe o pedido pelo WhatsApp e responde no app.` : ''"
+    >
+      <div
+        v-if="available.length"
+        role="radiogroup"
+        aria-label="Quem pode assumir"
+      >
+        <button
+          v-for="c in available"
+          :key="c.personId"
+          type="button"
+          role="radio"
+          class="listrow"
+          style="padding:10px 4px;border-top:1px solid var(--line-2)"
+          :aria-checked="chosen === c.personId"
+          @click="chosen = c.personId"
+        >
+          <span
+            class="av"
+            style="width:40px;height:40px"
+            aria-hidden="true"
+          >{{ initials(c.displayName) }}</span>
+          <span style="flex:1;min-width:0">
+            <span
+              class="strong"
+              style="display:block"
+            >{{ c.displayName }}</span>
+            <span
+              class="soft"
+              style="display:block;font-size:13.5px"
+            >{{ candSub(c) }}</span>
+          </span>
+          <span
+            v-if="chosen === c.personId"
+            style="width:26px;height:26px;border-radius:999px;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center"
+          ><Icon
+            name="check"
+            :weight="2.6"
+            style="width:14px;height:14px"
+          /></span>
+        </button>
+      </div>
+      <p
+        v-else
+        class="muted"
+      >
+        Ninguém mais que faz essa função está livre. Use “Não posso” para avisar a coordenação.
+      </p>
+      <textarea
+        v-model="note"
+        class="textarea"
+        style="min-height:80px;margin-top:12px;resize:vertical"
+        maxlength="300"
+        aria-label="Recado (opcional)"
+        placeholder="Opcional. Ex.: vou estar no Sínodo nesse fim de semana"
+      />
+      <button
+        type="button"
+        class="btn btn--block"
+        style="margin-top:14px"
+        :disabled="!chosen || sending"
+        @click="propose"
+      >
+        {{ chosen ? `Pedir a ${chosenName}` : 'Escolha alguém acima' }}
+      </button>
+    </Sheet>
   </section>
 </template>

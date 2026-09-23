@@ -65,7 +65,7 @@ export const ROUTES: RouteDoc[] = [
   { method: 'put', path: `${C}/people/{id}/availability/{month}`, summary: 'Registrar resposta recebida por outro canal', auth: 'coordinator', body: submitSchema },
   { method: 'get', path: `${C}/me`, summary: 'Perfil da pessoa na igreja', auth: 'session' },
   { method: 'get', path: `${C}/me/home`, summary: 'Início: próximas tarefas, pedidos de troca e de indisponibilidade', auth: 'session' },
-  { method: 'get', path: `${C}/me/tasks`, summary: 'Minhas tarefas em escalas publicadas', auth: 'session' },
+  { method: 'get', path: `${C}/me/tasks`, summary: 'Minhas tarefas em escalas publicadas', auth: 'session', query: { past: '1 inclui as dos últimos 90 dias' } },
   { method: 'get', path: `${C}/me/swaps`, summary: 'Pedidos de troca enviados e recebidos', auth: 'session' },
   { method: 'put', path: `${C}/me/consent`, summary: 'A própria pessoa autoriza ou revoga mensagens', auth: 'session', body: z.object({ status: z.enum(['granted', 'revoked']) }) },
   { method: 'get', path: `${C}/me/availability/{month}`, summary: 'Cultos do mês e minhas indisponibilidades', auth: 'session' },

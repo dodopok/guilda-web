@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, lt, ne, or, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { Db } from '../../db/client'
-import { outboundMessages, people, whatsappChannels } from '../../db/schema'
+import { consents, outboundMessages, people, whatsappChannels } from '../../db/schema'
 import { decryptSecret, encryptSecret, hasEncryptionKey, sha256 } from '../../lib/crypto'
 import { AppError, badRequest, notFound } from '../../lib/errors'
 import { normalizePhone } from '../../lib/phone'
@@ -19,8 +19,15 @@ export async function getChannelConfig(db: Db, ctx: ChurchContext) {
     channel = await getChannel(db, ctx.church.id)
   }
   const c = channel!
+  // Pessoas ativas com celular, e quantas autorizaram mensagens individuais.
+  const [consentStats] = await db.select({
+    people: sql<number>`count(*)::int`,
+    granted: sql<number>`count(*) filter (where exists (select 1 from ${consents} k where k.church_id = ${people.churchId} and k.person_id = ${people.id} and k.status = 'granted'))::int`,
+  }).from(people).where(and(eq(people.churchId, ctx.church.id), eq(people.status, 'active'), sql`${people.phoneE164} is not null`))
   return {
     mode: c.mode,
+    lastWebhookAt: c.lastWebhookAt,
+    consents: consentStats ?? { people: 0, granted: 0 },
     phoneNumberId: c.phoneNumberId,
     senderPhone: c.senderPhone,
     businessAccountId: c.businessAccountId,
@@ -178,7 +185,9 @@ export async function listMessages(db: Db, ctx: ChurchContext, q: z.infer<typeof
     unknown: sql<number>`count(*) filter (where status = 'unknown')::int`,
     queued: sql<number>`count(*) filter (where status in ('queued','sending'))::int`,
     simulated: sql<number>`count(*) filter (where status = 'simulated')::int`,
-    sent: sql<number>`count(*) filter (where status in ('sent','delivered','read'))::int`,
+    sent: sql<number>`count(*) filter (where status = 'sent')::int`,
+    delivered: sql<number>`count(*) filter (where status = 'delivered')::int`,
+    read: sql<number>`count(*) filter (where status = 'read')::int`,
   }).from(outboundMessages).where(eq(outboundMessages.churchId, ctx.church.id))
   return {
     counts,

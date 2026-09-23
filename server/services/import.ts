@@ -92,12 +92,19 @@ function splitNames(cell: string) {
 
 export function parseSheet(csv: string, month: string): ParsedRow[] {
   const rows = parseCsv(csv.replace(/^\uFEFF/, ''), detectDelimiter(csv))
-  const headerIdx = rows.findIndex((r) => r.some((c) => nameKey(c) === 'data') && r.some((c) => nameKey(c).startsWith('ministerio')))
+  // Cabeçalho opcional: DATA + MINISTÉRIO/FUNÇÃO + VOLUNTÁRIO/NOME. Sem cabeçalho, as
+  // colunas são lidas na ordem data; função; nome.
+  const isLabel = (c: string) => /^(ministerio|funcao)/.test(nameKey(c))
+  const isName = (c: string) => /^(voluntari|nome|pessoa)/.test(nameKey(c))
+  const headerIdx = rows.findIndex((r) => r.some((c) => nameKey(c) === 'data') && r.some(isLabel))
   const header = rows[headerIdx] ?? []
-  const col = (name: string) => header.findIndex((c) => nameKey(c).startsWith(name))
-  const iDate = headerIdx >= 0 ? col('data') : 0
-  const iLabel = headerIdx >= 0 ? col('ministerio') : 1
-  const iNames = headerIdx >= 0 ? col('voluntario') : 2
+  const pick = (test: (c: string) => boolean, fallback: number) => {
+    const i = header.findIndex(test)
+    return i >= 0 ? i : fallback
+  }
+  const iDate = pick((c) => nameKey(c) === 'data', 0)
+  const iLabel = pick(isLabel, 1)
+  const iNames = pick(isName, 2)
   const out: ParsedRow[] = []
   let current: string | null = null
   let currentRaw = ''
@@ -133,7 +140,7 @@ export async function previewImport(db: Db, ctx: ChurchContext, raw: ImportInput
   requireCoordinator(ctx)
   const input = importInputSchema.parse(raw)
   const rows = parseSheet(input.csv, input.month)
-  if (!rows.length) throw badRequest('empty_import', 'Não encontrei linhas com DATA, MINISTÉRIO e VOLUNTÁRIO.')
+  if (!rows.length) throw badRequest('empty_import', 'Não encontrei linhas no formato data; função; nome.')
   const dutyList = (await db.select().from(duties).where(eq(duties.churchId, ctx.church.id))).map((d) => ({ id: d.id, name: d.name, key: nameKey(d.name) }))
   const peopleList = await db.select().from(people).where(and(eq(people.churchId, ctx.church.id), eq(people.status, 'active')))
   const aliases = await db.select().from(personAliases).where(eq(personAliases.churchId, ctx.church.id))
