@@ -25,6 +25,7 @@ const groups = computed(() => [
     { to: link('/coordenacao/funcoes'), label: 'Funções' },
     { to: link('/coordenacao/modelos'), label: 'Modelos de liturgia' },
     { to: link('/coordenacao/repertorio'), label: 'Repertório' },
+    { to: link('/coordenacao/importar'), label: 'Importar planilha' },
   ] },
   { title: 'Comunicação', items: [
     { to: link('/coordenacao/mensagens'), label: 'Mensagens' },

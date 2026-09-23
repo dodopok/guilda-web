@@ -54,3 +54,30 @@
 | Estêvão/LOC | URL, chave, versão e direitos de exibição e redistribuição dos textos para outras igrejas? | Teste de contrato e verificação dos direitos antes de abrir o produto. |
 
 Essas respostas refinam políticas e integrações, sem exigir outro modelo de dados.
+
+## Premissas adotadas na implementação
+
+Decisões reversíveis tomadas para não travar o primeiro lançamento. Cada uma pode ser revista sem mudar o modelo de dados.
+
+| Tema | Premissa | Onde mudar |
+| --- | --- | --- |
+| Tecnologia | Nuxt 4.5 (SPA) + Nitro, PostgreSQL 17, Drizzle ORM com migrações SQL versionadas, Zod 4, scrypt nativo do Node para senhas, trabalhador próprio com fila no PostgreSQL (sem Redis). TypeScript 5.9, porque o `vue-tsc` ainda depende da API JavaScript do TypeScript, ausente no TypeScript 7. | `package.json` |
+| Login | Identificador é o celular em E.164 (o mesmo do convite). Uma conta pode estar em várias igrejas; o convite de uma segunda igreja vincula a conta existente mediante a senha dela. | `server/services/auth.ts` |
+| Primeira coordenação | A administração da plataforma cadastra a igreja e recebe o link do primeiro convite uma única vez, para entregar pessoalmente (o canal de WhatsApp da igreja ainda não existe). Não há cadastro público de igrejas. | `server/services/churches.ts` |
+| Mudanças após publicar | Depois da primeira publicação, cada alteração vale na hora, gera nova versão com a foto completa da escala (autor, data, motivo) e aciona correções dos lembretes. A coordenação escolhe, em cada alteração, se avisa os afetados na hora. Não há "rascunho de alterações" sobre um mês publicado. | `server/services/schedule-changes.ts` |
+| Confirmação volta a pendente | Só nas tarefas afetadas: culto com horário, local ou cancelamento alterado; posto com chegada alterada; designação trocada pela coordenação. Troca aceita pelo substituto já conta como confirmação dele. | `schedule.ts`, `worship.ts`, `responses.ts` |
+| Indisponível | Escalar alguém que marcou indisponibilidade exige justificativa; sem habilitação exige motivo (designação excepcional). Nenhum alerta bloqueia a publicação. | `schedule.ts` |
+| Choque × sequência | Tarefas no mesmo culto sem horário próprio são sequenciais (não choque). Choque é sobreposição entre cultos diferentes, ou entre postos com horário próprio. Carga no mesmo dia alerta a partir de 3 tarefas. | `server/services/alerts.ts` |
+| Folga | Referência: domingos do mês com culto. Alerta para quem não é pastor nem marcado como "fora da meta" quando o mês tem 2 ou mais domingos e a pessoa serve em todos. | `alerts.ts` |
+| Sem tarefa | Pessoa ativa, com habilitação para alguma função usada no mês, sem tarefa e disponível em ao menos um culto. | `alerts.ts` |
+| Coleta de indisponibilidade | Uma campanha por mês, enviada a quem tem alguma habilitação. A pessoa pode corrigir depois do prazo; a resposta fica marcada como alterada após o prazo e, se a escala já estiver publicada e ela estiver escalada naquele culto, a coordenação recebe alerta (a escala não muda sozinha). Culto criado depois do pedido aparece como "novo" e a coordenação pode avisar só sobre ele. Envio atrasado só acontece antes do prazo. | `server/services/availability.ts` |
+| Lembrete semanal | Padrão: quinta-feira às 19h, janela de 7 dias, desligado até a coordenação ligar. Tolerância de 6 horas para disparo atrasado; mudar a configuração não dispara retroativamente. Tarefas recusadas não entram no lembrete; a recusa feita pela própria pessoa não gera correção. Quem entra na escala depois do lembrete recebe o lembrete normal daquela janela. | `server/services/reminders.ts` |
+| Chegada | Horário de chegada é definido na função (minutos antes do culto) ou no posto. Sem definição, as mensagens dizem "chegada a combinar" — nunca usam o início do culto. | `reminders.ts` |
+| Prazo de confirmação | 48 horas antes do culto, configurável por igreja; usado para listar pendências perto do culto (não bloqueia respostas). | `churches.reminder*`, `responses.ts` |
+| Aviso à coordenação | Recusa, troca concluída e indisponibilidade tardia sobre escala publicada geram mensagem individual às pessoas da coordenação (com consentimento) e aparecem em Pendências. | `responses.ts`, `availability.ts` |
+| Músicas | Quem prega no culto (função do tipo sermão) escolhe; a coordenação pode passar a escolha aos pastores. Repertório sem letras. Aviso só a funções marcadas "recebe aviso das músicas" escaladas no culto. | `server/services/liturgy.ts` |
+| Roteiro | Rascunho visível a coordenação, pastores e quem prega; publicado visível a todos. Pastores registram observação informal. Nova versão só por publicação explícita; mudança na escala depois dela gera "revisão necessária". | `liturgy.ts` |
+| Textos do LOC | Cadastrados pela coordenação, marcados como "texto do LOC", restritos à igreja. Modelos não são copiados entre igrejas enquanto os direitos não forem verificados. | `liturgy.ts`, `docs/integracoes.md` |
+| Importação | CSV da aba do mês (DATA, MINISTÉRIO, VOLUNTÁRIO), só em mês ainda em rascunho, sem criar pessoas. Quem aparece sem habilitação cadastrada entra como designação excepcional com motivo "importado da planilha". Correspondências de nomes podem ser lembradas (apelidos). | `server/services/import.ts` |
+| WhatsApp em desenvolvimento | Igrejas de exemplo usam o modo de simulação; igrejas novas começam com o canal desativado. | `scripts/seed.ts`, `churches.ts` |
+| Resposta pelo WhatsApp | Confirmar/recusar respondendo a mensagem não faz parte deste lançamento; o webhook só trata estados de entrega e PARAR. | `messaging/webhook.ts` |

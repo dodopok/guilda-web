@@ -22,21 +22,23 @@ services:
   web:
     profiles: ["app"]
     build: .
+    image: guilda-web:local
     env_file: .env
     environment:
       DATABASE_URL: postgres://guilda:guilda@db:5432/guilda
-      NUXT_HOST: 0.0.0.0
+      HOST: 0.0.0.0
       PORT: 3000
+      WORKER_INLINE: "false"
     ports:
       - "3000:3000"
     depends_on:
       db:
         condition: service_healthy
-    command: ["sh", "-c", "node scripts-dist/migrate.mjs && node .output/server/index.mjs"]
+    command: ["sh", "-c", "./node_modules/.bin/tsx scripts/migrate.ts && node .output/server/index.mjs"]
 
   worker:
     profiles: ["app"]
-    build: .
+    image: guilda-web:local
     env_file: .env
     environment:
       DATABASE_URL: postgres://guilda:guilda@db:5432/guilda
@@ -45,7 +47,7 @@ services:
         condition: service_healthy
       web:
         condition: service_started
-    command: ["node", "scripts-dist/worker.mjs"]
+    command: ["./node_modules/.bin/tsx", "worker/index.ts"]
 
 volumes:
   guilda-db:

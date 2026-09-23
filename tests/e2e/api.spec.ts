@@ -10,7 +10,7 @@ test.describe('API v1: contrato e segurança', () => {
     const home = await request.get('/entrar')
     expect(home.headers()['x-frame-options']).toBe('DENY')
     expect(home.headers()['referrer-policy']).toBe('no-referrer')
-    expect(home.headers()['content-security-policy']).toContain("frame-ancestors 'none'")
+    expect(home.headers()['content-security-policy']).toContain('frame-ancestors \'none\'')
   })
 
   test('app nativo usa token Bearer; sem sessão responde 401', async ({ request }) => {

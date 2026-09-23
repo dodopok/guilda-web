@@ -20,10 +20,10 @@ watchEffect(() => {
   marked.value = new Set((data.value?.services ?? []).filter((s) => s.unavailable).map((s) => s.id))
   note.value = data.value?.response?.note ?? ''
 })
-function toggle(id: string) {
+function setUnavailable(id: string, value: boolean) {
   const next = new Set(marked.value)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
+  if (value) next.add(id)
+  else next.delete(id)
   marked.value = next
 }
 const saving = ref(false)
@@ -54,7 +54,7 @@ async function save() {
         v-if="data?.request"
         class="lede"
       >
-        Marque os cultos em que você <strong>não pode</strong> servir. Os demais ficam como disponíveis.
+        Para cada culto, diga se pode ou não servir. Tudo começa como “Posso”.
         <template v-if="!afterDeadline">
           Responda até {{ longDate(data.request.deadlineAt, tz) }}, às {{ time(data.request.deadlineAt, tz) }}.
         </template>
@@ -101,35 +101,41 @@ async function save() {
                 :at="s.startsAt"
                 :tz="tz"
               />
-              <label
-                class="check"
-                style="padding:0"
-              >
-                <input
-                  type="checkbox"
-                  :checked="marked.has(s.id)"
-                  :aria-describedby="`svc-${s.id}`"
-                  @change="toggle(s.id)"
+              <div>
+                <p
+                  :id="`svc-${s.id}`"
+                  style="font-weight:700;font-size:1.08rem"
                 >
-                <span class="check__text">
-                  <strong style="font-size:1.1rem">{{ marked.has(s.id) ? 'Não posso' : 'Posso' }}</strong>
+                  <span class="sr-only">{{ longDate(s.startsAt, tz) }}, </span>{{ s.title }} · {{ time(s.startsAt, tz) }}
                   <span
-                    :id="`svc-${s.id}`"
-                    class="ink-2"
-                    style="display:block"
-                  >
-                    {{ longDate(s.startsAt, tz) }} — {{ s.title }} às {{ time(s.startsAt, tz) }}
-                    <span
-                      v-if="s.kind !== 'regular'"
-                      class="tag tag--plain"
-                    >{{ s.kind === 'special' ? 'especial' : 'curto' }}</span>
-                    <span
-                      v-if="s.isNew"
-                      class="tag tag--info"
-                    >novo</span>
-                  </span>
-                </span>
-              </label>
+                    v-if="s.kind !== 'regular'"
+                    class="tag tag--plain"
+                  >{{ s.kind === 'special' ? 'especial' : 'curto' }}</span>
+                  <span
+                    v-if="s.isNew"
+                    class="tag tag--info"
+                  >novo</span>
+                </p>
+                <div
+                  class="seg"
+                  role="radiogroup"
+                  :aria-labelledby="`svc-${s.id}`"
+                  style="margin-top:.5rem"
+                >
+                  <label class="seg--yes"><input
+                    type="radio"
+                    :name="`av-${s.id}`"
+                    :checked="!marked.has(s.id)"
+                    @change="setUnavailable(s.id, false)"
+                  ><Icon name="check" /> Posso</label>
+                  <label class="seg--no"><input
+                    type="radio"
+                    :name="`av-${s.id}`"
+                    :checked="marked.has(s.id)"
+                    @change="setUnavailable(s.id, true)"
+                  ><Icon name="x" /> Não posso</label>
+                </div>
+              </div>
             </li>
           </ul>
         </fieldset>

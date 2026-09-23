@@ -22,7 +22,7 @@ test('fluxo 2: pedido de indisponibilidade, resposta e painel respondeu × silê
   await expect(alice.getByText(/Quais cultos de .* você não pode servir\?/)).toBeVisible()
   await alice.getByRole('link', { name: 'Responder agora' }).first().click()
   await expect(alice).toHaveURL(new RegExp(`/disponibilidade/${month}`))
-  await alice.getByRole('checkbox').first().check()
+  await alice.getByRole('radio', { name: 'Não posso' }).first().check()
   await alice.getByRole('button', { name: /Enviar: não posso em 1/ }).click()
   await expect(alice.getByText(/Resposta enviada/)).toBeVisible()
 

@@ -53,14 +53,14 @@ const counts = computed(() => {
 })
 
 function accessText(p: PersonAdmin) {
-  if (p.hasAccount) return { text: 'tem acesso', tone: 'ok' }
+  if (p.hasAccount) return { text: 'com acesso', tone: 'ok' }
   if (p.invite?.state === 'pending') return { text: 'convite enviado', tone: 'info' }
   if (p.invite?.state === 'expired') return { text: 'convite expirou', tone: 'wait' }
   return { text: 'sem convite', tone: 'plain' }
 }
 function consentText(p: PersonAdmin) {
   if (!p.phone) return { text: 'sem telefone', tone: 'wait' }
-  if (p.consent?.status === 'granted') return { text: 'WhatsApp autorizado', tone: 'ok' }
+  if (p.consent?.status === 'granted') return { text: 'autorizado', tone: 'ok' }
   if (p.consent?.status === 'revoked') return { text: 'pediu para não receber', tone: 'plain' }
   return { text: 'sem autorização', tone: 'wait' }
 }
