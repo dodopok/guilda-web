@@ -54,21 +54,10 @@ function resize(img: HTMLImageElement) {
 async function onLogo(e: Event) {
   const file = (e.target as HTMLInputElement).files?.[0]
   if (!file) return
-  if (!/^image\/(png|jpeg|webp)$/.test(file.type)) {
-    toast.error('Envie uma imagem PNG, JPG ou WebP.')
-    return
-  }
   uploading.value = true
   try {
-    const url = URL.createObjectURL(file)
-    const img = new Image()
-    await new Promise((resolve, reject) => {
-      img.onload = resolve
-      img.onerror = reject
-      img.src = url
-    })
+    const img = await loadImageFile(file)
     const dataUrl = resize(img)
-    URL.revokeObjectURL(url)
     await capi('/logo', { method: 'PUT', body: { dataUrl } })
     const found = extractPalette(img)
     if (found.length) {
@@ -81,7 +70,7 @@ async function onLogo(e: Event) {
     await refreshInfo()
     if (info.value) info.value.church.accentColor = form.accentColor
   } catch (err) {
-    toast.error(err, 'Não foi possível ler a imagem.')
+    toast.error(err, 'Não foi possível enviar a imagem.')
   } finally {
     uploading.value = false
     ;(e.target as HTMLInputElement).value = ''

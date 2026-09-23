@@ -235,3 +235,27 @@ test('nova igreja: convite da coordenação abre a configuração inicial', asyn
   await admin.context().close()
   await coord.context().close()
 })
+
+test('logo: JPG enviado em Configurações é lido, guardado e sugere cores', async ({ browser }) => {
+  const coord = await as(browser, PHONES.coord)
+  await coord.goto('/i/porto/coordenacao/configuracoes')
+  // Gera um JPG de verdade no próprio navegador (quadrado azul com faixa laranja).
+  const b64 = await coord.evaluate(() => {
+    const c = document.createElement('canvas')
+    c.width = 400
+    c.height = 300
+    const g = c.getContext('2d')!
+    g.fillStyle = '#1f6f8b'
+    g.fillRect(0, 0, 400, 300)
+    g.fillStyle = '#c2561c'
+    g.fillRect(0, 200, 400, 100)
+    return c.toDataURL('image/jpeg', 0.9).split(',')[1]!
+  })
+  await coord.locator('input[type=file]').setInputFiles({ name: 'logo.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(b64, 'base64') })
+  await expect(coord.getByText(/Cores encontradas no logo|Logo enviado/)).toBeVisible()
+  await expect(coord.getByText('Não foi possível')).toHaveCount(0)
+  const res = await coord.request.get('/api/v1/churches/porto/logo')
+  expect(res.status()).toBe(200)
+  expect(res.headers()['content-type']).toMatch(/image\/(webp|png)/)
+  await coord.context().close()
+})
