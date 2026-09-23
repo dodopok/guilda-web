@@ -5,7 +5,11 @@ import { AppError } from '../lib/errors'
 // Em várias instâncias, complementar com limite no proxy reverso.
 const buckets = new Map<string, { count: number, resetAt: number }>()
 
-export function rateLimit(event: H3Event, key: string, max: number, windowMs: number) {
+// RATE_LIMIT_FACTOR multiplica os limites (ex.: testes automatizados locais).
+const factor = Math.max(1, Number(process.env.RATE_LIMIT_FACTOR ?? 1) || 1)
+
+export function rateLimit(event: H3Event, key: string, maxPerWindow: number, windowMs: number) {
+  const max = maxPerWindow * factor
   const ip = getRequestIP(event, { xForwardedFor: true }) ?? 'unknown'
   const id = `${key}:${ip}`
   const now = Date.now()
