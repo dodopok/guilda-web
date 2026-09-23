@@ -1,10 +1,10 @@
 import { readFileSync } from 'node:fs'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { describe, expect, it, vi } from 'vitest'
 import { liturgicalSnapshots, outboundMessages, slots } from '../../server/db/schema'
 import {
   applySuggestions, createScript, createSong, createTemplate, duplicateTemplate, exportHtml, exportText, fetchSuggestions,
-  getPublishedContent, getScript, notifyMusic, publishScript, replaceBlocks, setMusic, updateScript,
+  getPublishedContent, getScript, notifyMusic, publishScript, replaceBlocks, searchSongs, setMusic, updateScript,
 } from '../../server/services/liturgy'
 import { assignPerson, publishMonth, reassign } from '../../server/services/schedule'
 import { makeChurch, makeService, slotOf, useDb, type ChurchFixture } from '../helpers'
@@ -175,7 +175,53 @@ describe('roteiro de liturgia e Estêvão', () => {
     await notifyMusic(db(), f.pastor.ctx, svc.id)
     const msgs = await db().select().from(outboundMessages).where(eq(outboundMessages.kind, 'music_notice'))
     expect(msgs.map((m) => m.personId).sort()).toEqual([f.bruno.id, f.carla.id].sort())
-    expect(msgs[0]!.preview).toContain('Cântico A (D), Cântico B')
+    expect(msgs[0]!.preview).toContain('Cântico A (tom D), Cântico B')
+  })
+
+  it('música da busca entra no repertório uma vez; tom do culto muda o aviso e o publicado', async () => {
+    const { f, svc } = await setup(db())
+    const link = 'https://www.cifraclub.com.br/artista-de-exemplo/cancao-de-exemplo/'
+    const a = await createSong(db(), f.pastor.ctx, { title: 'Canção de exemplo', author: 'Artista de Exemplo', link })
+    const again = await createSong(db(), f.coord.ctx, { title: 'Canção de exemplo', author: 'Artista de Exemplo', link })
+    expect(again.id).toBe(a.id)
+    const b = await createSong(db(), f.pastor.ctx, { title: 'Cântico B', musicalKey: 'D' })
+
+    await setMusic(db(), f.pastor.ctx, svc.id, { songIds: [a.id, b.id], songKeys: { [a.id]: 'G', [b.id]: '' } })
+    const view = await getScript(db(), f.coord.ctx, svc.id)
+    expect(view.draft!.blocks.find((x) => x.type === 'music')!.data.songKeys).toEqual({ [a.id]: 'G' })
+    await notifyMusic(db(), f.pastor.ctx, svc.id)
+    // Mudar só o tom gera novo aviso.
+    await setMusic(db(), f.pastor.ctx, svc.id, { songIds: [a.id, b.id], songKeys: { [a.id]: 'A', [b.id]: 'E' } })
+    await notifyMusic(db(), f.pastor.ctx, svc.id)
+    const previews = (await db().select().from(outboundMessages).where(and(eq(outboundMessages.kind, 'music_notice'), eq(outboundMessages.personId, f.bruno.id)))).map((m) => m.preview)
+    expect(previews.length).toBe(2)
+    expect(previews.some((p) => p?.includes('Canção de exemplo (tom G), Cântico B (tom D)'))).toBe(true)
+    expect(previews.some((p) => p?.includes('Canção de exemplo (tom A), Cântico B (tom E)'))).toBe(true)
+
+    await publishScript(db(), f.coord.ctx, svc.id)
+    const pub = await getPublishedContent(db(), f.coord.ctx, svc.id)
+    const music = (pub.content.blocks as { type: string, songs: { musicalKey: string | null, originalKey: string | null, link: string | null }[] }[]).find((x) => x.type === 'music')!
+    expect(music.songs).toEqual([
+      { title: 'Canção de exemplo', author: 'Artista de Exemplo', musicalKey: 'A', originalKey: null, link },
+      { title: 'Cântico B', author: null, musicalKey: 'E', originalKey: 'D', link: null },
+    ])
+  })
+
+  it('busca no Cifra Club: só músicas, link montado com segurança; falha não quebra', async () => {
+    const { f } = await setup(db())
+    const payload = { response: { docs: [
+      { tipo: '1', art: 'Artista', dns: 'artista' },
+      { tipo: '2', art: 'Artista', txt: 'Canção', dns: 'artista', url: 'cancao' },
+      { tipo: '2', art: 'X', txt: 'Ruim', dns: '../evil', url: 'x' },
+    ] } }
+    const ok = vi.fn(async () => new Response(JSON.stringify(payload), { status: 200 }))
+    const r = await searchSongs(db(), f.pastor.ctx, 'canção', ok as unknown as typeof fetch)
+    expect(r).toEqual({ available: true, hits: [{ title: 'Canção', artist: 'Artista', link: 'https://www.cifraclub.com.br/artista/cancao/' }] })
+    const call = ok.mock.calls[0] as unknown as [string]
+    expect(call[0]).toBe('https://busca.example.test/cc/?q=can%C3%A7%C3%A3o&wt=json')
+    const down = await searchSongs(db(), f.pastor.ctx, 'outra busca', downFetch as unknown as typeof fetch)
+    expect(down).toMatchObject({ available: false, hits: [] })
+    await expect(searchSongs(db(), f.ana.ctx, 'canção', ok as unknown as typeof fetch)).rejects.toMatchObject({ status: 403 })
   })
 
   it('modelos duplicáveis para celebração especial e culto curto', async () => {

@@ -114,7 +114,7 @@ export const TEMPLATES: Record<MessageKind, TemplateDefinition> = {
     label: 'Músicas do culto',
     category: 'UTILITY',
     body: 'Olá, {{nome}}! As músicas do culto de {{culto}} em {{igreja}} foram definidas: {{musicas}}. Veja no app: {{link}}',
-    vars: [NOME, v('culto', 'culto', 'domingo, 04/10'), IGREJA, v('musicas', 'músicas', 'Grande é o Senhor; Santo, Santo, Santo'), LINK],
+    vars: [NOME, v('culto', 'culto', 'domingo, 04/10'), IGREJA, v('musicas', 'músicas', 'Grande é o Senhor (tom G), Santo, Santo, Santo (tom D)'), LINK],
   },
   reading_notice: {
     kind: 'reading_notice',

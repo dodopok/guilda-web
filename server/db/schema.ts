@@ -613,6 +613,8 @@ export interface ScriptBlockData {
   // Posição da leitura no lecionário: first_reading | psalm | second_reading | gospel.
   slot?: string
   songIds?: string[]
+  // Tom de cada música neste culto (id da música → tom); sem entrada, vale o tom original.
+  songKeys?: Record<string, string>
   // Avisos: "fixed" volta automaticamente nos próximos roteiros (todo domingo).
   items?: { text: string, ownerPersonId?: string | null, status?: 'draft' | 'ready', fixed?: boolean }[]
   // Texto do modelo no momento da criação, para "voltar ao padrão" num rito adaptado.
