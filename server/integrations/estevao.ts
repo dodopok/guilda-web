@@ -38,6 +38,8 @@ export const dayPayloadSchema = z.object({
     season: z.object({ slug: z.string().optional().nullable(), name: z.string().optional().nullable() }).passthrough().optional().nullable(),
     color: z.string().optional().nullable(),
     sunday_name: z.string().optional().nullable(),
+    // Ex.: ["Próprio 23", "28ª Semana do Tempo Comum", …]
+    description: z.array(z.string()).optional().nullable(),
     week_of_season: z.union([z.number(), z.string()]).optional().nullable(),
     is_sunday: z.boolean().optional().nullable(),
     is_holy_day: z.boolean().optional().nullable(),
@@ -71,6 +73,8 @@ const COLOR_PT: Record<string, string> = { green: 'verde', purple: 'roxo', viole
 export interface LiturgicalSuggestion {
   date: string
   sundayName: string | null
+  // "Próprio 23" nos domingos do Tempo Comum; ausente nas outras estações e festas.
+  proper?: string | null
   season: string | null
   color: string | null
   celebration: string | null
@@ -92,6 +96,7 @@ export function normalizeDay(payload: DayPayload): LiturgicalSuggestion {
   return {
     date: d.date,
     sundayName: d.sunday_name ?? null,
+    proper: (d.description ?? []).find((x) => /^Próprio\s+\d+/i.test(x.trim()))?.trim() ?? null,
     season: d.season?.name ?? null,
     color,
     celebration: d.celebration?.name ?? null,
@@ -99,6 +104,12 @@ export function normalizeDay(payload: DayPayload): LiturgicalSuggestion {
     collects: (d.collect ?? []).filter((c) => c.text).map((c) => ({ title: c.title || c.kind || 'Coleta', text: c.text! })),
     readings,
   }
+}
+
+// Nome do domingo no roteiro: "19º Domingo no Tempo Comum (Próprio 23)".
+export function sundayTitle(s: Pick<LiturgicalSuggestion, 'sundayName' | 'proper'>) {
+  if (!s.sundayName) return null
+  return s.proper && !s.sundayName.includes(s.proper) ? `${s.sundayName} (${s.proper})` : s.sundayName
 }
 
 export function dayPath(date: string, prefs: { prayerBook: string, readingType: string }) {

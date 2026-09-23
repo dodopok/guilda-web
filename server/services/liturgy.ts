@@ -22,8 +22,8 @@ import type { ScriptBlockData } from '../db/schema'
 import { sha256 } from '../lib/crypto'
 import { badRequest, forbidden, notFound } from '../lib/errors'
 import { formatServiceDate, localParts } from '../lib/time'
-import { firstName } from '../lib/text'
-import { EstevaoError, fetchLiturgicalDay, type LiturgicalSuggestion } from '../integrations/estevao'
+import { firstName, nameKey } from '../lib/text'
+import { EstevaoError, fetchLiturgicalDay, type LiturgicalSuggestion, sundayTitle } from '../integrations/estevao'
 import { audit } from './audit'
 import { type ChurchContext, isCoordinator, isPastor, requireCoordinator } from './context'
 import { enqueueMessage } from './messaging/outbox'
@@ -159,6 +159,24 @@ async function canChooseMusic(db: DbOrTx, ctx: ChurchContext, serviceId: string,
   return chooser === 'preacher' && isPreacherOf(db, ctx, serviceId)
 }
 
+// Leituras do lecionário. O modelo guarda uma leitura por posição, com estes títulos; o
+// roteiro sabe assim quais o Estêvão deve preencher e mantém quem lê cada posição.
+export const READING_SLOTS = [
+  { slot: 'first_reading', title: 'Primeira leitura', type: 'reading' },
+  { slot: 'psalm', title: 'Salmo', type: 'psalm' },
+  { slot: 'second_reading', title: 'Segunda leitura', type: 'reading' },
+  { slot: 'gospel', title: 'Evangelho', type: 'reading' },
+] as const
+// Outros nomes de posição usados por alguns livros de oração.
+const SLOT_ALIASES: Record<string, string> = { old_testament: 'first_reading', epistle: 'second_reading', psalm_alternative: 'psalm' }
+export function canonicalSlot(key: string) {
+  return SLOT_ALIASES[key] ?? key
+}
+function slotFromTitle(title: string) {
+  const k = nameKey(title)
+  return READING_SLOTS.find((x) => nameKey(x.title) === k)?.slot
+}
+
 export async function createScript(db: Db, ctx: ChurchContext, serviceId: string, templateId?: string | null) {
   requireCoordinator(ctx)
   return db.transaction(async (tx) => {
@@ -184,7 +202,9 @@ export async function createScript(db: Db, ctx: ChurchContext, serviceId: string
         churchId: ctx.church.id, scriptId: script!.id, position: i, type: b.type, title: b.title, body: b.body, textSource: b.textSource, dutyId: b.dutyId,
         data: b.type === 'announcements' && fixedItems.length
           ? { items: fixedItems }
-          : b.type === 'rite' || b.type === 'text' ? { templateBody: b.body } : {},
+          : b.type === 'rite' || b.type === 'text'
+            ? { templateBody: b.body }
+            : (b.type === 'reading' || b.type === 'psalm') && slotFromTitle(b.title) ? { slot: slotFromTitle(b.title) } : {},
       })))
     }
     await audit(tx, { churchId: ctx.church.id, actorAccountId: ctx.accountId, action: 'script.created', entityType: 'script', entityId: script!.id, data: { templateId } })
@@ -360,6 +380,7 @@ const scriptBlockSchema = z.object({
     reference: z.string().trim().max(200).optional(),
     alternatives: z.array(z.string().trim().min(1).max(200)).max(6).optional(),
     source: z.enum(['estevao', 'manual']).optional(),
+    slot: z.string().trim().max(40).optional(),
     songIds: z.array(z.string().uuid()).max(30).optional(),
     items: z.array(z.object({
       text: z.string().trim().min(1).max(1000),
@@ -478,7 +499,9 @@ export async function applySuggestions(db: Db, ctx: ChurchContext, serviceId: st
       if (target) {
         Object.assign(target, { title: 'Coleta do dia', body: collect.text, textSource: 'estevao', data: { ...target.data, source: 'estevao' } })
       } else {
-        next.unshift({ ...blankBlock(ctx, script.id), type: 'collect', title: 'Coleta do dia', body: collect.text, textSource: 'estevao', data: { source: 'estevao' } })
+        // Sem bloco de coleta no modelo: entra logo depois dos títulos do topo.
+        const at = next.findIndex((b) => b.type !== 'heading')
+        next.splice(at < 0 ? next.length : at, 0, { ...blankBlock(ctx, script.id), type: 'collect', title: 'Coleta do dia', body: collect.text, textSource: 'estevao', data: { source: 'estevao' } })
       }
     }
     if (input.readings.length || input.replaceReadings) {
@@ -486,7 +509,9 @@ export async function applySuggestions(db: Db, ctx: ChurchContext, serviceId: st
       const firstReadingIdx = next.findIndex((b) => b.type === 'reading' || b.type === 'psalm')
       const oldReadings = next.filter((b) => b.type === 'reading' || b.type === 'psalm')
       const newReadings = input.readings.map((r, i) => {
-        const previous = oldReadings[i]
+        // Mesma posição do lecionário (ou, sem posição marcada, a mesma ordem).
+        const slot = canonicalSlot(r.key)
+        const previous = oldReadings.find((o) => o.data.slot === slot) ?? (oldReadings.some((o) => o.data.slot) ? undefined : oldReadings[i])
         return {
           ...blankBlock(ctx, script.id),
           type: r.key.startsWith('psalm') ? 'psalm' : 'reading',
@@ -496,7 +521,7 @@ export async function applySuggestions(db: Db, ctx: ChurchContext, serviceId: st
           // Mantém a pessoa já atribuída à leitura na mesma posição, se houver.
           dutyId: previous?.dutyId ?? readingDuty?.id ?? null,
           personId: previous?.personId ?? null,
-          data: { reference: r.reference, source: 'estevao' as const, ...(r.alternatives.length ? { alternatives: r.alternatives } : {}) },
+          data: { reference: r.reference, source: 'estevao' as const, slot, ...(r.alternatives.length ? { alternatives: r.alternatives } : {}) },
         }
       })
       if (input.replaceReadings) {
@@ -511,6 +536,11 @@ export async function applySuggestions(db: Db, ctx: ChurchContext, serviceId: st
       }
     } else {
       blocks = next as typeof blocks
+    }
+    // Bloco "Nome do domingo": recebe o nome da semana, com o Próprio no Tempo Comum.
+    const sundayName = sundayTitle(suggestion)
+    if (input.applyCalendar && sundayName) {
+      for (const b of blocks) if (b.type === 'heading' && b.textSource === 'estevao') b.title = sundayName
     }
     await tx.delete(scriptBlocks).where(and(eq(scriptBlocks.churchId, ctx.church.id), eq(scriptBlocks.scriptId, script.id)))
     if (blocks.length) {

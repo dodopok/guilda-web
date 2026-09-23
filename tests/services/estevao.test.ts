@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { EstevaoError, dayPath, fetchLiturgicalDay, normalizeDay } from '../../server/integrations/estevao'
+import { EstevaoError, dayPath, fetchLiturgicalDay, normalizeDay, sundayTitle } from '../../server/integrations/estevao'
 
 const cfg = { url: 'https://estevao.example.test', apiKey: 'k', timeoutMs: 1000 }
 const prefs = { prayerBook: 'loc_2015', readingType: 'complementary' }
@@ -37,6 +37,17 @@ describe('cliente do Estêvão (v2)', () => {
       { key: 'canticle', label: 'Leitura', reference: 'Cântico 9', alternatives: [] },
     ])
     expect(s.collects).toEqual([{ title: 'Coleta do Dia', text: 'Texto.' }])
+  })
+
+  it('extrai o Próprio da descrição e monta o nome do domingo sem repetir', () => {
+    const s = normalizeDay({ data: { date: '2026-10-11', sunday_name: '19º Domingo no Tempo Comum', description: ['28ª Semana', ' Próprio 23 '] } })
+    expect(s.proper).toBe('Próprio 23')
+    expect(sundayTitle(s)).toBe('19º Domingo no Tempo Comum (Próprio 23)')
+    expect(sundayTitle({ sundayName: 'Domingo Próprio 23', proper: 'Próprio 23' })).toBe('Domingo Próprio 23')
+    const advent = normalizeDay({ data: { date: '2026-11-29', sunday_name: '1º Domingo do Advento', description: ['Semana do Advento'] } })
+    expect(advent.proper).toBeNull()
+    expect(sundayTitle(advent)).toBe('1º Domingo do Advento')
+    expect(sundayTitle({ sundayName: null, proper: null })).toBeNull()
   })
 
   it('traduz erros problem+json pelo código estável', async () => {

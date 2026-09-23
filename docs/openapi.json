@@ -10883,6 +10883,10 @@
                                 "manual"
                               ]
                             },
+                            "slot": {
+                              "type": "string",
+                              "maxLength": 40
+                            },
                             "songIds": {
                               "maxItems": 30,
                               "type": "array",

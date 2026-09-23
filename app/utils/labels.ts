@@ -73,19 +73,26 @@ export function messageTint(status: string) {
   return { key, ...MESSAGE_TINT[key]! }
 }
 
-// Blocos de liturgia: cor da etiqueta, frase curta e origem padrão do texto.
-export const BLOCK_KINDS: Record<string, { label: string, sub: string, bg: string, fg: string, source: string }> = {
-  heading: { label: 'Título', sub: 'Separa partes do culto', bg: '#1d221f', fg: '#fff', source: 'church' },
-  rite: { label: 'Rito', sub: 'Texto fixo do LOC', bg: '#f0efe9', fg: '#4a5450', source: 'loc_manual' },
-  collect: { label: 'Coleta', sub: 'Vem do Estêvão', bg: '#e3ebf8', fg: '#2f5fa8', source: 'estevao' },
-  reading: { label: 'Leitura', sub: 'Vem do Estêvão', bg: '#e3ebf8', fg: '#2f5fa8', source: 'estevao' },
-  psalm: { label: 'Salmo', sub: 'Vem do Estêvão', bg: '#e3ebf8', fg: '#2f5fa8', source: 'estevao' },
-  sermon: { label: 'Sermão', sub: 'Quem prega escolhe o texto', bg: '#fff1d6', fg: '#a86400', source: 'church' },
-  music: { label: 'Músicas', sub: 'Do repertório', bg: '#efe6fb', fg: '#5b3aa6', source: 'church' },
-  announcements: { label: 'Avisos', sub: 'Fixos e do período', bg: '#fde4e0', fg: '#8f2a1e', source: 'church' },
-  text: { label: 'Texto livre', sub: 'O que precisar', bg: '#f0efe9', fg: '#4a5450', source: 'church' },
+// Blocos do modelo de liturgia, como a coordenação escolhe. A origem do texto é do próprio
+// tipo: "Vem do Estêvão" é preenchido a cada domingo; o resto é da igreja.
+export type TemplateKindKey = 'heading' | 'sunday' | 'rite' | 'collect' | 'readings' | 'sermon' | 'music' | 'announcements' | 'text'
+export const BLOCK_KINDS: Record<TemplateKindKey, { label: string, sub: string, bg: string, fg: string, estevao?: boolean, hasText?: boolean, hasDuty?: boolean }> = {
+  heading: { label: 'Título', sub: 'Separa partes do culto', bg: '#1d221f', fg: '#fff' },
+  rite: { label: 'Rito / texto fixo', sub: 'Texto que a igreja digita uma vez', bg: '#f0efe9', fg: '#4a5450', hasText: true, hasDuty: true },
+  sermon: { label: 'Sermão', sub: 'Quem prega escolhe o texto', bg: '#fff1d6', fg: '#a86400', hasDuty: true },
+  music: { label: 'Músicas', sub: 'Do repertório', bg: '#efe6fb', fg: '#5b3aa6', hasDuty: true },
+  announcements: { label: 'Avisos', sub: 'Fixos e do período', bg: '#fde4e0', fg: '#8f2a1e', hasDuty: true },
+  text: { label: 'Texto livre', sub: 'O que precisar', bg: '#f0efe9', fg: '#4a5450', hasText: true, hasDuty: true },
+  sunday: { label: 'Nome do domingo', sub: 'Ex.: 19º Domingo no Tempo Comum (Próprio 23)', bg: '#e3ebf8', fg: '#2f5fa8', estevao: true },
+  collect: { label: 'Coleta do dia', sub: 'A oração própria do domingo', bg: '#e3ebf8', fg: '#2f5fa8', estevao: true, hasDuty: true },
+  readings: { label: 'Leituras do dia', sub: '1ª leitura, salmo, 2ª leitura e evangelho', bg: '#e3ebf8', fg: '#2f5fa8', estevao: true, hasDuty: true },
 }
-export const SOURCE_SHORT: Record<string, string> = { church: 'Texto da igreja', loc_manual: 'LOC digitado', estevao: 'Estêvão' }
+export const READING_SLOTS = [
+  { slot: 'first_reading', title: 'Primeira leitura', type: 'reading' },
+  { slot: 'psalm', title: 'Salmo', type: 'psalm' },
+  { slot: 'second_reading', title: 'Segunda leitura', type: 'reading' },
+  { slot: 'gospel', title: 'Evangelho', type: 'reading' },
+] as const
 export const TEMPLATE_KIND: Record<string, string> = { regular: 'Comum', special: 'Especial', short: 'Curto' }
 
 export const TASK_TAG: Record<string, { label: string, bg: string, fg: string }> = {

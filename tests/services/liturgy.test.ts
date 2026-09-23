@@ -87,6 +87,43 @@ describe('roteiro de liturgia e Estêvão', () => {
     expect(v2.draft!.blocks.find((b) => b.data.reference === 'Am 5.18-24')!.responsibles.map((r) => r.name)).toEqual(['Bruno Reis'])
   })
 
+  it('modelo com nome do domingo e posições de leitura: Estêvão preenche só o marcado e mantém quem lê', async () => {
+    const f = await makeChurch(db(), 'porto')
+    const svc = await makeService(db(), f, '2026-11-08')
+    const t = await createTemplate(db(), f.coord.ctx, {
+      name: 'Com posições',
+      kind: 'regular',
+      blocks: [
+        { type: 'heading', title: 'Nome do domingo', textSource: 'estevao' },
+        { type: 'reading', title: 'Primeira leitura', textSource: 'estevao', dutyId: f.duties.leitura },
+        { type: 'psalm', title: 'Salmo', textSource: 'estevao', dutyId: f.duties.leitura },
+        { type: 'reading', title: 'Evangelho', textSource: 'estevao', dutyId: f.duties.leitura },
+      ],
+    })
+    await createScript(db(), f.coord.ctx, svc.id, t.id)
+    const created = await getScript(db(), f.coord.ctx, svc.id)
+    expect(created.draft!.blocks.filter((b) => b.type !== 'heading').map((b) => b.data.slot)).toEqual(['first_reading', 'psalm', 'gospel'])
+    // Quem guia o salmo é escolhido antes de buscar as leituras.
+    const withReader = created.draft!.blocks.map((b) => ({ type: b.type as 'reading', title: b.title, body: b.body, textSource: b.textSource as 'church', dutyId: b.dutyId, personId: b.type === 'psalm' ? f.carla.id : b.personId, data: b.data }))
+    await replaceBlocks(db(), f.coord.ctx, svc.id, { blocks: withReader })
+
+    const json = JSON.parse(dayJson)
+    json.data.sunday_name = '32º Domingo no Tempo Comum'
+    json.data.description = ['Próprio 27']
+    const fetch2 = vi.fn(async () => new Response(JSON.stringify(json), { status: 200, headers: { 'content-type': 'application/json' } }))
+    const sug = await fetchSuggestions(db(), f.coord.ctx, svc.id, fetch2 as unknown as typeof fetch)
+    if (!sug.ok) throw new Error('sugestão')
+    const wanted = sug.suggestion.readings.filter((r) => ['first_reading', 'psalm', 'gospel'].includes(r.key))
+    const view = await applySuggestions(db(), f.coord.ctx, svc.id, {
+      snapshotId: sug.snapshotId, collectIndex: 0, readings: wanted.map((r) => ({ key: r.key, reference: r.reference, label: r.label })), replaceReadings: true, applyCalendar: true,
+    })
+    const blocks = view.draft!.blocks
+    expect(blocks[0]!.title).toBe('32º Domingo no Tempo Comum (Próprio 27)')
+    expect(blocks[1]!.type).toBe('collect')
+    expect(blocks.slice(2).map((b) => [b.data.slot, b.data.reference])).toEqual([['first_reading', 'Am 5.18-24'], ['psalm', 'Sl 70'], ['gospel', 'Mt 25.1-13']])
+    expect(blocks.find((b) => b.type === 'psalm')!.responsibles.map((r) => r.name)).toEqual(['Carla Dias'])
+  })
+
   it('falha do Estêvão não impede o roteiro: preenchimento manual continua', async () => {
     const { f, svc } = await setup(db())
     const res = await fetchSuggestions(db(), f.coord.ctx, svc.id, downFetch as unknown as typeof fetch)
