@@ -264,6 +264,7 @@ button.listrow:hover, a.listrow:hover { background: var(--surface-2); color: inh
 .chip svg { width: 13px; height: 13px; }
 .chip[aria-pressed='true'] { background: var(--accent-soft); color: var(--accent-deep); border-color: var(--accent-mid); }
 .chip--lg { min-height: 38px; font-size: 14px; }
+.chip--sm { min-height: 30px; padding: 3px 10px; font-size: 12.5px; }
 .chip--dark[aria-pressed='true'] { background: var(--ink); color: #fff; border-color: var(--ink); }
 .chip--person { padding: 4px 10px 4px 4px; min-height: 34px; }
 .chip--person .av { width: 24px; height: 24px; background: rgba(255, 255, 255, .7); color: var(--ink); font-size: 10.5px; }

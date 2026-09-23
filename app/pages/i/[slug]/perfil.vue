@@ -18,7 +18,7 @@ const { data: counts } = await useAsyncData(`you-counts-${route.params.slug}`, a
   }
 })
 const consentOn = computed(() => p.value?.consent?.status === 'granted')
-const roleLabel = computed(() => (isCoordinator.value ? 'Coordenação' : isPastor.value ? 'Pastoral' : 'Voluntário(a)'))
+const roleLabel = computed(() => roleTags([...(isCoordinator.value ? ['coordinator'] : []), ...(isPastor.value ? ['pastor'] : [])]).join(' · ') || 'Voluntário(a)')
 const { info } = useChurch()
 const reminderText = computed(() => {
   const c = info.value?.church
