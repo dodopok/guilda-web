@@ -48,6 +48,10 @@ docker compose --profile app up --build
 
 Sobe PostgreSQL, a aplicação (aplica migrações ao iniciar) e o trabalhador. Depois rode `pnpm db:seed` apontando para o banco se quiser os dados de exemplo.
 
+## Subir para teste (Railway)
+
+Passo a passo com banco, trabalhador, primeiro acesso e webhook do YCloud: [docs/implantacao-railway.md](docs/implantacao-railway.md).
+
 ## Verificações
 
 ```bash
