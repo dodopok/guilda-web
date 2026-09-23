@@ -430,7 +430,10 @@ function setRole(r: 'vol' | 'coord' | 'pastor') {
     </template>
 
     <!-- Pessoa -->
-    <Sheet v-model:open="personOpen">
+    <Sheet
+      v-model:open="personOpen"
+      :label="person?.displayName"
+    >
       <template
         v-if="person"
         #head
@@ -682,7 +685,10 @@ function setRole(r: 'vol' | 'coord' | 'pastor') {
     </Sheet>
 
     <!-- Função -->
-    <Sheet v-model:open="dutyOpen">
+    <Sheet
+      v-model:open="dutyOpen"
+      :label="duty?.name"
+    >
       <template
         v-if="duty"
         #head

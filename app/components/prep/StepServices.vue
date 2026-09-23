@@ -226,6 +226,8 @@ const KIND: Record<string, string> = { special: 'especial', short: 'curto' }
               type="button"
               class="icon-btn"
               style="border:0;width:36px;height:36px;border-radius:10px"
+              :style="sl.requiredCount > 1 ? '' : 'color:var(--no)'"
+              :title="sl.requiredCount > 1 ? undefined : 'Tirar deste culto'"
               :aria-label="sl.requiredCount > 1 ? `Menos uma pessoa em ${sl.dutyName}` : `Tirar ${sl.dutyName} deste culto`"
               @click="setCount(sl.id, sl.requiredCount - 1)"
             >
@@ -255,9 +257,9 @@ const KIND: Record<string, string> = { special: 'especial', short: 'curto' }
         <template v-if="missingDuties.length">
           <p
             class="caps"
-            style="margin:16px 0 8px"
+            style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line-2);margin-bottom:8px"
           >
-            Acrescentar função
+            Acrescentar função neste culto
           </p>
           <div class="chips">
             <button
@@ -265,6 +267,7 @@ const KIND: Record<string, string> = { special: 'especial', short: 'curto' }
               :key="d.id"
               type="button"
               class="chip"
+              style="border-style:dashed;border-color:var(--off);color:var(--ink-2)"
               @click="addDuty(d.id)"
             >
               <Icon

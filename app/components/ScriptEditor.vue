@@ -6,7 +6,7 @@ import type { EditableBlock, LiturgicalSuggestion, ScriptView, Song } from '~/ty
 const props = defineProps<{
   view: ScriptView
   serviceId: string
-  people: { id: string, displayName: string, dutyIds: string[] }[]
+  people: { id: string, displayName: string, dutyIds: string[], roles?: string[] }[]
   songs: Song[]
   canPublish: boolean
   isPastor: boolean
@@ -14,7 +14,8 @@ const props = defineProps<{
   scheduled: Record<string, string[]>
 }>()
 const emit = defineEmits<{ (e: 'refresh'): void }>()
-const { capi, tz } = useChurch()
+const { capi, tz, slug } = useChurch()
+const exportBase = computed(() => `/api/v1/churches/${slug.value}/scripts/${props.serviceId}/export`)
 const toast = useToast()
 
 const blocks = ref<(EditableBlock & { notified?: boolean, origPerson?: string | null, origRef?: string })[]>([])
@@ -315,6 +316,11 @@ async function save() {
     busy.value = false
   }
 }
+// Quem prega: pastores em destaque; outra pessoa exige confirmação da coordenação.
+const pastors = computed(() => props.people.filter((p) => p.roles?.includes('pastor')))
+const nonPastors = computed(() => props.people.filter((p) => !p.roles?.includes('pastor')))
+const isPastorId = (id: string | null) => Boolean(id && pastors.value.some((p) => p.id === id))
+const fullName = (id: string | null) => props.people.find((p) => p.id === id)?.displayName ?? ''
 async function saveDraft() {
   if (await persist()) toast.ok('Rascunho salvo.')
 }
@@ -735,18 +741,67 @@ async function saveDraft() {
           </template>
 
           <!-- Sermão -->
-          <label
-            v-else-if="it.kind === 'sermon' && it.block"
-            class="field"
-            style="margin-top:10px"
-          >
-            <span class="field__label">Texto base <span class="field__opt">(pode ser diferente das leituras)</span></span>
-            <input
-              v-model="it.block.data.reference"
-              class="input"
-              style="min-height:46px;font-size:15.5px"
+          <template v-else-if="it.kind === 'sermon' && it.block">
+            <div style="margin-top:10px">
+              <span
+                :id="`preacher-${it.key}`"
+                class="field__label"
+              >Quem prega?</span>
+              <div
+                class="row"
+                style="gap:6px"
+                role="group"
+                :aria-labelledby="`preacher-${it.key}`"
+              >
+                <button
+                  v-for="p in pastors"
+                  :key="p.id"
+                  type="button"
+                  class="chip chip--person"
+                  :aria-pressed="it.block.personId === p.id"
+                  @click="it.block.personId = it.block.personId === p.id ? null : p.id"
+                >
+                  <span class="av">{{ initials(p.displayName) }}</span>{{ p.displayName }}
+                </button>
+                <select
+                  class="chip"
+                  style="padding:4px 10px;cursor:pointer"
+                  :style="it.block.personId && !isPastorId(it.block.personId) ? 'background:var(--accent);color:var(--accent-ink);border-color:var(--accent)' : ''"
+                  :value="it.block.personId && !isPastorId(it.block.personId) ? it.block.personId : ''"
+                  aria-label="Outra pessoa prega"
+                  @change="it.block.personId = ($event.target as HTMLSelectElement).value || null"
+                >
+                  <option value="">
+                    Outra pessoa…
+                  </option>
+                  <option
+                    v-for="p in nonPastors"
+                    :key="p.id"
+                    :value="p.id"
+                  >
+                    {{ p.displayName }}
+                  </option>
+                </select>
+              </div>
+              <p
+                v-if="it.block.personId && !isPastorId(it.block.personId)"
+                style="margin-top:8px;font-size:13.5px;color:#a86400;font-weight:700"
+              >
+                {{ fullName(it.block.personId) }} não é pastor(a): a coordenação confirma antes de publicar.
+              </p>
+            </div>
+            <label
+              class="field"
+              style="margin-top:10px"
             >
-          </label>
+              <span class="field__label">Texto base <span class="field__opt">(pode ser diferente das leituras)</span></span>
+              <input
+                v-model="it.block.data.reference"
+                class="input"
+                style="min-height:46px;font-size:15.5px"
+              >
+            </label>
+          </template>
 
           <!-- Avisos -->
           <template v-else-if="it.kind === 'announcements' && it.block">
@@ -860,11 +915,23 @@ async function saveDraft() {
     </div>
 
     <div class="savebar">
+      <template v-if="view.published">
+        <a
+          :href="`${exportBase}?format=txt`"
+          class="link"
+        >Baixar texto</a>
+        <a
+          :href="`${exportBase}?format=html`"
+          target="_blank"
+          rel="noopener"
+          class="link"
+        >Imprimir</a>
+      </template>
       <button
-        v-if="canPublish && dirty"
         type="button"
-        class="btn btn--secondary btn--md"
-        :disabled="busy"
+        class="btn btn--secondary"
+        style="min-height:52px;font-size:15px"
+        :disabled="busy || !dirty"
         @click="saveDraft"
       >
         Salvar rascunho
@@ -876,7 +943,7 @@ async function saveDraft() {
         :disabled="busy"
         @click="save"
       >
-        {{ canPublish ? 'Publicar roteiro' : 'Salvar e enviar à coordenação' }}
+        {{ canPublish ? 'Publicar' : 'Salvar e enviar' }}
       </button>
     </div>
 

@@ -80,6 +80,15 @@ Legenda: [x] feito e testado · [~] implementado, depende de validação externa
 - [~] Número de Porto conectado no YCloud (feito pela coordenação); falta cadastrar as credenciais na tela do canal e registrar a comprovação de coexistência
 - [~] Aprovação dos modelos, envio de teste real, webhooks públicos, custos
 
+## Novo layout (Guilda.dc.html)
+
+- [x] Casca, cor da igreja, logo, configuração inicial, Mesa, Preparar mês em 4 passos, Pessoas e funções, Configurações
+- [x] Telas do voluntário: Início, Disponibilidade, Escala, Roteiro, Você, Suas escalas, Detalhe da tarefa, Pedidos de troca
+- [x] Portas: Entrar, Convite (3 passos), Esqueci minha senha, Nova senha (entra direto), Escolher igreja, Nova igreja
+- [x] Ferramentas: Mensagens enviadas, Canal do WhatsApp (checklist com último webhook assinado e autorizações), Modelos de liturgia, Editar modelo, Repertório, Importar planilha (colar, .xlsx/.csv, conferir, criar pessoa), Histórico
+- [x] Exceção na escala em folha própria, com motivo obrigatório; "Quem prega?" no roteiro; aviso de escala alterada com "Atualizar no roteiro"
+- Diferenças deliberadas do protótipo: senha com no mínimo 10 caracteres (o protótipo fala em 8); "Reenviar" só para mensagens que não chegaram (reenviar entregue duplicaria); "Link enviado" não confirma se o número tem conta (evita enumeração); Nova igreja mostra o convite uma única vez em vez de enviar, porque a igreja nova ainda não tem canal.
+
 ## Qualidade
 
 - [x] `pnpm lint`, `pnpm typecheck`, `pnpm test` (Vitest com PostgreSQL), `pnpm build`, `pnpm test:e2e` (Playwright)

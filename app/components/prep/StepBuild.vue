@@ -75,9 +75,9 @@ const curSlot = computed(() => cur.value?.slots.find((x) => x.id === curDuty.val
 const cands = computed(() => (cur.value && curSlot.value ? candidatesFor(cur.value, curSlot.value) : null))
 
 const busy = ref(false)
-async function assign(personId: string, reason?: { exceptionReason?: string, overrideUnavailableReason?: string }) {
+async function assign(personId: string, reason?: { exceptionReason?: string, overrideUnavailableReason?: string }, slotId?: string) {
   const s = cur.value
-  const sl = allSlot.value ?? curSlot.value
+  const sl = (slotId ? s?.slots.find((x) => x.id === slotId) : null) ?? allSlot.value ?? curSlot.value
   if (!s || !sl) return
   busy.value = true
   try {
@@ -125,23 +125,38 @@ function nextService() {
 // Folha com todas as pessoas para uma função.
 const allSlotId = ref<string | null>(null)
 const allSlot = computed(() => cur.value?.slots.find((x) => x.id === allSlotId.value) ?? null)
-const allOpen = computed({ get: () => Boolean(allSlotId.value), set: (v) => { if (!v) { allSlotId.value = null; exception.value = null } } })
+const allOpen = computed({ get: () => Boolean(allSlotId.value), set: (v) => { if (!v) allSlotId.value = null } })
 const allCands = computed(() => (cur.value && allSlot.value ? candidatesFor(cur.value, allSlot.value) : null))
-const exception = ref<{ id: string, name: string, kind: 'unav' | 'unqualified' } | null>(null)
+// Exceção: folha própria, com o motivo obrigatório (fica no histórico).
+const exception = ref<{ id: string, name: string, kind: 'unav' | 'unqualified', slotId: string, dutyName: string, alsoUnavailable: boolean } | null>(null)
+const exceptionOpen = computed({ get: () => Boolean(exception.value), set: (v) => { if (!v) exception.value = null } })
 const reason = ref('')
+const reasonMissing = ref(false)
 function askException(c: Cand, kind: 'unav' | 'unqualified') {
-  exception.value = { id: c.id, name: c.name, kind }
+  const sl = allSlot.value ?? curSlot.value
+  if (!sl) return
+  const alsoUnavailable = kind === 'unqualified' && Boolean(cur.value?.unavailablePersonIds.includes(c.id))
+  allSlotId.value = null
+  exception.value = { id: c.id, name: c.name, kind, slotId: sl.id, dutyName: dutyName(sl.dutyId), alsoUnavailable }
   reason.value = ''
+  reasonMissing.value = false
 }
+const exceptionWhy = computed(() => {
+  const e = exception.value
+  if (!e) return ''
+  const first = e.name.split(' ')[0]
+  if (e.kind === 'unav') return `${first} avisou que não pode neste culto.`
+  return `${first} não está habilitado(a) em ${e.dutyName}.${e.alsoUnavailable ? ' E avisou que não pode neste culto.' : ''}`
+})
 async function confirmException() {
   const e = exception.value
-  if (!e || reason.value.trim().length < 3) {
-    toast.error('Escreva o motivo em poucas palavras (fica registrado no histórico).')
+  if (!e) return
+  if (reason.value.trim().length < 3) {
+    reasonMissing.value = true
     return
   }
   const r = reason.value.trim()
-  const alsoUnavailable = Boolean(cur.value?.unavailablePersonIds.includes(e.id))
-  await assign(e.id, e.kind === 'unav' ? { overrideUnavailableReason: r } : { exceptionReason: r, ...(alsoUnavailable ? { overrideUnavailableReason: r } : {}) })
+  await assign(e.id, e.kind === 'unav' ? { overrideUnavailableReason: r } : { exceptionReason: r, ...(e.alsoUnavailable ? { overrideUnavailableReason: r } : {}) }, e.slotId)
 }
 
 // Resumo do mês.
@@ -472,7 +487,7 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
       :title="allSlot && cur ? `${dutyName(allSlot.dutyId)} · ${weekdayShort(cur.startsAt, tz)} ${dayNumber(cur.startsAt, tz)}` : ''"
       :lede="`Todo mundo, em ordem de quem tem menos tarefas no mês.`"
     >
-      <template v-if="allCands && !exception">
+      <template v-if="allCands">
         <p
           class="caps"
           style="color:var(--ok);margin-bottom:6px"
@@ -572,33 +587,69 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
           </button>
         </details>
       </template>
+    </Sheet>
+
+    <Sheet
+      v-model:open="exceptionOpen"
+      :label="exception ? `Escalar ${exception.name.split(' ')[0]} mesmo assim?` : undefined"
+    >
+      <template
+        v-if="exception"
+        #head
+      >
+        <p
+          class="caps"
+          style="color:#a86400"
+        >
+          Exceção
+        </p>
+        <h2
+          class="sheet__title"
+          style="margin-top:2px"
+        >
+          Escalar {{ exception.name.split(' ')[0] }} mesmo assim?
+        </h2>
+        <p class="sheet__lede">
+          {{ exceptionWhy }} Conte o motivo — fica no histórico e ajuda a explicar depois.
+        </p>
+      </template>
       <form
-        v-else-if="exception"
-        class="stack-md"
+        v-if="exception"
+        novalidate
         @submit.prevent="confirmException"
       >
-        <p>
-          <strong>{{ exception.name }}</strong> {{ exception.kind === 'unav' ? 'avisou que não pode neste culto.' : 'não está habilitado(a) para esta função.' }} Escreva o motivo — fica registrado no histórico da escala.
-        </p>
-        <input
+        <textarea
           v-model="reason"
-          class="input"
+          class="textarea"
+          style="min-height:90px;margin-top:14px;resize:vertical"
           maxlength="300"
-          :placeholder="exception.kind === 'unav' ? 'Ex.: combinamos por telefone, vai conseguir vir' : 'Ex.: vai aprender acompanhando'"
           aria-label="Motivo"
+          :aria-invalid="reasonMissing"
+          :placeholder="exception.kind === 'unav' ? 'Ex.: combinamos por telefone, vai conseguir vir' : 'Ex.: vai aprender acompanhando'"
+          @input="reasonMissing = false"
+        />
+        <p
+          v-if="reasonMissing"
+          role="alert"
+          style="margin-top:8px;font-size:13.5px;color:var(--no);font-weight:700"
         >
-        <div class="row">
+          Escreva o motivo para continuar.
+        </p>
+        <div
+          class="row"
+          style="gap:10px;margin-top:14px"
+        >
           <button
-            class="btn grow"
-            style="min-height:50px"
+            class="btn"
+            style="flex:1"
             :disabled="busy"
           >
-            Escalar como exceção
+            Escalar com este motivo
           </button>
           <button
             type="button"
             class="btn btn--secondary"
-            style="min-height:50px"
+            style="min-height:50px;font-size:15px"
             @click="exception = null"
           >
             Voltar

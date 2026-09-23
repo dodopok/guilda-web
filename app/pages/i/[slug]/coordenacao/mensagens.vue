@@ -206,7 +206,10 @@ const runs = computed(() => (rem.value?.runs ?? []).map((r) => {
       </p>
     </div>
 
-    <Sheet v-model:open="simOpen">
+    <Sheet
+      v-model:open="simOpen"
+      label="Mensagem simulada"
+    >
       <template
         v-if="sim"
         #head

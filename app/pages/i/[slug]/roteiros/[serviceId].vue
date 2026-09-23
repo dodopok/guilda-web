@@ -23,14 +23,16 @@ async function ensureScript() {
   creating.value = true
   try {
     await capi(`/scripts/${serviceId.value}`, { method: 'POST', body: { templateId: t.id } })
-    await refresh()
+    // Busca direto: um refresh() enquanto a página ainda carrega pode ser descartado.
+    data.value = await capi<ScriptView>(`/scripts/${serviceId.value}`)
   } catch (e) {
     toast.error(e)
   } finally {
     creating.value = false
   }
 }
-watch(() => data.value?.service.id, ensureScript, { immediate: true })
+// Reage também ao papel chegar depois (a casca carrega a igreja em paralelo).
+watch([() => data.value?.service.id, isCoordinator], ensureScript, { immediate: true })
 
 // Apoio ao editor: pessoas (quem lê), repertório e escala deste culto.
 interface PubMonth { services: { id: string, slots: { dutyId: string, dutyName: string, people: { personId: string, status: string }[] }[] }[] }
@@ -38,7 +40,7 @@ const { data: aux } = await useAsyncData(() => `script-aux-${serviceId.value}`, 
   if (!data.value || !(data.value.canEdit || data.value.canChooseMusic)) return null
   const month = data.value.service.localDate.slice(0, 7)
   const [people, songs, pub] = await Promise.all([
-    capi<{ people: { id: string, displayName: string, dutyIds: string[], status?: string }[] }>('/people'),
+    capi<{ people: { id: string, displayName: string, dutyIds: string[], roles: string[], status?: string }[] }>('/people'),
     capi<{ songs: Song[] }>('/songs'),
     capi<PubMonth>(`/schedule/${month}/published`).catch(() => ({ services: [] }) as PubMonth),
   ])
@@ -88,6 +90,28 @@ async function savePreacherSongs() {
     savingSongs.value = false
   }
 }
+// "Clara entrou no Salmo no lugar de Davi."
+function staleLine(c: { blockTitle: string, published: string[], current: string[] }) {
+  const inn = c.current.filter((n) => !c.published.includes(n))
+  const out = c.published.filter((n) => !c.current.includes(n))
+  if (inn.length && out.length) return `${inn.join(' e ')} ${inn.length > 1 ? 'entraram' : 'entrou'} em ${c.blockTitle} no lugar de ${out.join(' e ')}.`
+  if (inn.length) return `${inn.join(' e ')} ${inn.length > 1 ? 'entraram' : 'entrou'} em ${c.blockTitle}.`
+  if (out.length) return `${out.join(' e ')} ${out.length > 1 ? 'saíram' : 'saiu'} de ${c.blockTitle}.`
+  return ''
+}
+const republishing = ref(false)
+async function republish() {
+  republishing.value = true
+  try {
+    const r = await capi<{ version: number }>(`/scripts/${serviceId.value}/publish`, { method: 'POST' })
+    toast.ok(`Roteiro atualizado (versão ${r.version}).`)
+    await refresh()
+  } catch (e) {
+    toast.error(e)
+  } finally {
+    republishing.value = false
+  }
+}
 const exportBase = computed(() => `/api/v1/churches/${slug.value}/scripts/${serviceId.value}/export`)
 </script>
 
@@ -100,6 +124,23 @@ const exportBase = computed(() => `/api/v1/churches/${slug.value}/scripts/${serv
       {{ apiErrorMessage(error) }}
     </p>
     <template v-if="data">
+      <nav
+        v-if="editor && (others?.length ?? 0) > 1"
+        class="pills"
+        style="margin-bottom:-4px"
+        aria-label="Outros cultos"
+      >
+        <NuxtLink
+          v-for="o in others"
+          :key="o.serviceId"
+          :to="link(`/roteiros/${o.serviceId}`)"
+          class="pill"
+          style="border-radius:999px;min-height:36px;padding:6px 12px;font-size:13.5px"
+          :aria-current="o.serviceId === serviceId ? 'page' : undefined"
+        >
+          <span class="pill__wd">{{ weekdayShort(o.startsAt, tz) }}</span> {{ dayNumber(o.startsAt, tz) }}/{{ monthShort(o.startsAt, tz) }}
+        </NuxtLink>
+      </nav>
       <div>
         <p
           class="eyebrow row"
@@ -126,44 +167,36 @@ const exportBase = computed(() => `/api/v1/churches/${slug.value}/scripts/${serv
         </p>
       </div>
 
-      <nav
-        v-if="editor && (others?.length ?? 0) > 1"
-        class="pills"
-        aria-label="Outros cultos"
-      >
-        <NuxtLink
-          v-for="o in others"
-          :key="o.serviceId"
-          :to="link(`/roteiros/${o.serviceId}`)"
-          class="pill"
-          :aria-current="o.serviceId === serviceId ? 'page' : undefined"
-        >
-          <span class="pill__wd">{{ weekdayShort(o.startsAt, tz) }}</span> {{ dayNumber(o.startsAt, tz) }}/{{ monthShort(o.startsAt, tz) }}
-        </NuxtLink>
-      </nav>
-
       <div
         v-if="editor && data.needsReview?.required"
-        class="panel panel--wait"
-        style="border-radius:18px"
+        class="row"
+        style="gap:12px;background:#fff1d6;border-radius:18px;padding:12px 16px"
+        role="status"
       >
-        <p class="strong">
-          A escala mudou depois que o roteiro foi publicado
+        <Icon
+          name="alert"
+          :weight="2"
+          style="width:22px;height:22px;color:#a86400;flex:none"
+        />
+        <p style="flex:1;min-width:200px;color:#5c3a00;font-size:14.5px">
+          <strong>A escala mudou depois de publicar.</strong>
+          <template
+            v-for="c in data.needsReview.changes"
+            :key="c.blockTitle"
+          >
+            {{ ' ' }}{{ staleLine(c) }}
+          </template>
         </p>
-        <p
-          v-for="c in data.needsReview.changes"
-          :key="c.blockTitle"
-          class="small"
-          style="margin-top:4px"
+        <button
+          v-if="canPublish"
+          type="button"
+          class="btn btn--white btn--sm"
+          style="color:#5c3a00"
+          :disabled="republishing"
+          @click="republish"
         >
-          {{ c.blockTitle }}: {{ c.published.join(', ') || 'ninguém' }} → {{ c.current.join(', ') || 'ninguém' }}
-        </p>
-        <p
-          class="small"
-          style="margin-top:6px"
-        >
-          Publique de novo para atualizar o roteiro de todos.
-        </p>
+          Atualizar no roteiro
+        </button>
       </div>
 
       <!-- Edição: coordenação e pastores -->
@@ -275,7 +308,7 @@ const exportBase = computed(() => `/api/v1/churches/${slug.value}/scripts/${serv
       </template>
 
       <p
-        v-if="data.published"
+        v-if="data.published && !editor"
         class="row no-print"
         style="gap:6px 16px"
       >
