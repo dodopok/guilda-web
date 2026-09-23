@@ -1,0 +1,3 @@
+ALTER TABLE "whatsapp_channels" ADD COLUMN "sender_phone" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "whatsapp_channels_phone_number_id_uq" ON "whatsapp_channels" USING btree ("phone_number_id") WHERE "whatsapp_channels"."phone_number_id" is not null;--> statement-breakpoint
+CREATE UNIQUE INDEX "whatsapp_channels_sender_phone_uq" ON "whatsapp_channels" USING btree ("sender_phone") WHERE "whatsapp_channels"."sender_phone" is not null;

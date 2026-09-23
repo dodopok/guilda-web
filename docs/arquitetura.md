@@ -56,3 +56,13 @@ Não é necessário separar o back-end em outro repositório só para criar o Fl
 - Um link, tarefa agendada ou identificador de outra igreja não pode expor contatos ou conteúdo litúrgico da igreja vizinha.
 
 Separar repositórios só fará sentido diante de uma exigência real de equipe, escala ou implantação independente.
+
+## Como ficou implementado
+
+- **Um repositório, uma aplicação Nuxt 4** em modo SPA: a interface Vue fala só com a API `/api/v1`, a mesma que um app nativo usará. As rotas Nitro são finas (validação Zod + chamada de serviço); as regras ficam em `server/services/`, sem dependência do Nuxt, e são reutilizadas pelo trabalhador e pelos testes.
+- **Banco**: Drizzle ORM com migrações SQL em `server/db/migrations`. Isolamento por igreja reforçado no próprio banco com chaves estrangeiras compostas `(church_id, id)`.
+- **Trabalhador** (`worker/index.ts`): ciclo a cada 30 s que envia pedidos de indisponibilidade agendados, cria a execução do lembrete semanal no instante configurado (idempotente por igreja e horário), calcula correções comparando o que cada pessoa recebeu com a escala atual e despacha a fila com `FOR UPDATE SKIP LOCKED`.
+- **Integrações** em `server/integrations/`: cliente mínimo da Cloud API (sem SDK) e do Estêvão, ambos com validação da resposta e testes de contrato.
+- **Autenticação para dois clientes**: cookie httpOnly na web (com checagem de origem) e Bearer para o app nativo, sobre a mesma tabela de sessões.
+- **Datas**: instantes em UTC; mês, dia e horário calculados no fuso da igreja (`@date-fns/tz`), inclusive horário de verão.
+- **Documentação da API** gerada dos próprios esquemas (`docs/openapi.json`).
