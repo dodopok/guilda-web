@@ -7,25 +7,23 @@ const securityHeaders = {
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
   'Cross-Origin-Opener-Policy': 'same-origin',
   'Content-Security-Policy': [
-    "default-src 'self'",
-    "script-src 'self' 'unsafe-inline'",
-    "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data:",
-    "connect-src 'self'",
-    "font-src 'self'",
-    "frame-ancestors 'none'",
-    "base-uri 'self'",
-    "form-action 'self'",
+    'default-src \'self\'',
+    'script-src \'self\' \'unsafe-inline\'',
+    'style-src \'self\' \'unsafe-inline\'',
+    'img-src \'self\' data:',
+    'connect-src \'self\'',
+    'font-src \'self\'',
+    'frame-ancestors \'none\'',
+    'base-uri \'self\'',
+    'form-action \'self\'',
   ].join('; '),
 }
 
 export default defineNuxtConfig({
-  compatibilityDate: '2026-09-01',
   modules: ['@nuxt/eslint'],
-  devtools: { enabled: false },
   // Aplicação autenticada: renderização no navegador; a API é o contrato público.
   ssr: false,
-  css: ['~/assets/css/main.css'],
+  devtools: { enabled: false },
   app: {
     head: {
       htmlAttrs: { lang: 'pt-BR' },
@@ -38,14 +36,16 @@ export default defineNuxtConfig({
       link: [{ rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }],
     },
   },
+  css: ['~/assets/css/main.css'],
   routeRules: {
     '/**': { headers: securityHeaders },
     '/api/**': { headers: { 'Cache-Control': 'no-store' } },
   },
-  typescript: { strict: true },
-  eslint: { config: { stylistic: true } },
+  compatibilityDate: '2026-09-01',
   nitro: {
     // O trabalhador roda em processo separado (pnpm worker); nada agendado dentro do web.
     experimental: { tasks: false },
   },
+  typescript: { strict: true },
+  eslint: { config: { stylistic: { arrowParens: true, braceStyle: '1tbs', commaDangle: 'always-multiline' } } },
 })

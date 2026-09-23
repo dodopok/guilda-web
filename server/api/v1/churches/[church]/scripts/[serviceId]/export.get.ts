@@ -18,6 +18,6 @@ export default defineApiHandler(async (event) => {
   }
   setHeader(event, 'Content-Type', 'text/html; charset=utf-8')
   setHeader(event, 'Content-Disposition', `inline; filename="${filename}.html"`)
-  setHeader(event, 'Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'")
+  setHeader(event, 'Content-Security-Policy', 'default-src \'none\'; style-src \'unsafe-inline\'')
   return exportHtml(pub.content, ctx.church.timezone, pub.version)
 })

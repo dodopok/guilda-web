@@ -10,10 +10,10 @@ import { type MessageKind, TEMPLATES } from './templates'
 
 // Decide por onde uma mensagem pode sair. Nunca recai silenciosamente na simulação:
 // um canal oficial incompleto bloqueia a mensagem com o motivo.
-export type Route =
-  | { kind: 'simulation' }
-  | { kind: 'cloud_api', phoneNumberId: string, accessToken: string, templateName: string, language: string }
-  | { kind: 'blocked', reason: string }
+export type Route
+  = | { kind: 'simulation' }
+    | { kind: 'cloud_api', phoneNumberId: string, accessToken: string, templateName: string, language: string }
+    | { kind: 'blocked', reason: string }
 
 export function channelReadiness(channel: WhatsappChannel | null) {
   const cfg = getConfig()

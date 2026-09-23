@@ -3,12 +3,11 @@ import { z } from 'zod'
 import { getConfig } from '../config'
 import type { Db, DbOrTx } from '../db/client'
 import { assignmentResponses, assignments, duties, outboundMessages, people, qualifications, scheduleMonths, services, slots, swapRequests, unavailabilities } from '../db/schema'
-import { AppError, badRequest, conflict, forbidden, notFound } from '../lib/errors'
+import { AppError, badRequest, conflict, notFound } from '../lib/errors'
 import { formatServiceDate } from '../lib/time'
 import { firstName } from '../lib/text'
 import { audit } from './audit'
-import { type ChurchContext, isCoordinator, requireCoordinator, requirePerson } from './context'
-import type { ChurchRow } from './context'
+import { type ChurchContext, type ChurchRow, isCoordinator, requireCoordinator, requirePerson } from './context'
 import { enqueueMessage } from './messaging/outbox'
 import { syncReminderCorrections } from './reminders'
 import { currentScheduleVersion, recordScheduleChange } from './schedule-changes'
@@ -255,11 +254,23 @@ export async function respondToSwap(db: Db, ctx: ChurchContext, swapId: string, 
 export async function mySwaps(db: Db, ctx: ChurchContext) {
   const me = requirePerson(ctx)
   const fromPeople = sql`from_p.display_name`
-  const rows = await db.execute<{
-    id: string, status: string, message: string | null, created_at: Date, responded_at: Date | null,
-    assignment_id: string, from_person_id: string, candidate_person_id: string, from_name: string, candidate_name: string,
-    duty_name: string, service_title: string, starts_at: Date, location: string | null
-  }>(sql`
+  type SwapRow = {
+    id: string
+    status: string
+    message: string | null
+    created_at: Date
+    responded_at: Date | null
+    assignment_id: string
+    from_person_id: string
+    candidate_person_id: string
+    from_name: string
+    candidate_name: string
+    duty_name: string
+    service_title: string
+    starts_at: Date
+    location: string | null
+  }
+  const rows = await db.execute<SwapRow>(sql`
     select sr.id, sr.status, sr.message, sr.created_at, sr.responded_at, sr.assignment_id, sr.from_person_id, sr.candidate_person_id,
       ${fromPeople} as from_name, cand_p.display_name as candidate_name, d.name as duty_name, s.title as service_title, s.starts_at, s.location
     from swap_requests sr
@@ -298,6 +309,7 @@ export async function coordinationPending(db: Db, ctx: ChurchContext) {
   const now = new Date()
   const base = db.select({
     assignmentId: assignments.id,
+    slotId: slots.id,
     status: assignments.status,
     personId: people.id,
     personName: people.displayName,

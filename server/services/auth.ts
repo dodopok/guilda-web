@@ -200,6 +200,7 @@ export async function describeInvite(db: Db, token: string) {
   const existing = person.phoneE164 ? await db.query.accounts.findFirst({ where: eq(accounts.login, person.phoneE164) }) : null
   return {
     churchName: church.name,
+    timezone: church.timezone,
     firstName: firstName(person.displayName),
     expiresAt: row.expiresAt,
     accountExists: Boolean(existing),

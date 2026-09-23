@@ -206,10 +206,12 @@ export async function listPeople(db: Db, ctx: ChurchContext) {
       notes: p.notes,
       hasAccount: Boolean(p.accountId),
       consent: c ? { status: c.status, source: c.source, updatedAt: c.updatedAt, evidenceNote: c.evidenceNote } : null,
-      invite: inv ? {
-        createdAt: new Date(inv.created_at),
-        state: inv.used_at ? 'used' : inv.revoked_at ? 'revoked' : new Date(inv.expires_at) < new Date() ? 'expired' : 'pending',
-      } : null,
+      invite: inv
+        ? {
+            createdAt: new Date(inv.created_at),
+            state: inv.used_at ? 'used' : inv.revoked_at ? 'revoked' : new Date(inv.expires_at) < new Date() ? 'expired' : 'pending',
+          }
+        : null,
       dutyIds: dutyMap.get(p.id) ?? [],
     }
   })

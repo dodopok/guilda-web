@@ -470,8 +470,8 @@ export async function myTasks(db: Db, ctx: ChurchContext, opts: { from?: Date } 
   const assignmentIds = rows.map((r) => r.assignment.id)
   const swaps = assignmentIds.length
     ? await db.select({ swap: swapRequests, candidateName: people.displayName }).from(swapRequests)
-      .innerJoin(people, and(eq(people.churchId, swapRequests.churchId), eq(people.id, swapRequests.candidatePersonId)))
-      .where(and(eq(swapRequests.churchId, ctx.church.id), inArray(swapRequests.assignmentId, assignmentIds), eq(swapRequests.status, 'proposed')))
+        .innerJoin(people, and(eq(people.churchId, swapRequests.churchId), eq(people.id, swapRequests.candidatePersonId)))
+        .where(and(eq(swapRequests.churchId, ctx.church.id), inArray(swapRequests.assignmentId, assignmentIds), eq(swapRequests.status, 'proposed')))
     : []
   const deadlineHours = ctx.church.confirmationDeadlineHours
   return rows.map((r) => ({

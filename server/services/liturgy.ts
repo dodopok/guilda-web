@@ -489,16 +489,18 @@ export async function applySuggestions(db: Db, ctx: ChurchContext, serviceId: st
     }
     await tx.update(serviceScripts).set({
       liturgicalSnapshotId: snap.id,
-      ...(input.applyCalendar ? {
-        liturgy: {
-          ...script.liturgy,
-          color: suggestion.color,
-          celebration: suggestion.celebration,
-          sundayName: suggestion.sundayName,
-          season: suggestion.season,
-          source: 'estevao',
-        },
-      } : {}),
+      ...(input.applyCalendar
+        ? {
+            liturgy: {
+              ...script.liturgy,
+              color: suggestion.color,
+              celebration: suggestion.celebration,
+              sundayName: suggestion.sundayName,
+              season: suggestion.season,
+              source: 'estevao',
+            },
+          }
+        : {}),
       updatedAt: new Date(),
     }).where(eq(serviceScripts.id, script.id))
     await audit(tx, { churchId: ctx.church.id, actorAccountId: ctx.accountId, action: 'script.estevao_applied', entityType: 'script', entityId: script.id, data: { snapshotId: snap.id, readings: input.readings.length } })

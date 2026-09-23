@@ -12,17 +12,17 @@ export interface AlertInput {
   publishedAt: Date | null
 }
 
-export type AlertType =
-  | 'vacancy'
-  | 'unavailable'
-  | 'not_qualified'
-  | 'exceptional'
-  | 'clash'
-  | 'same_day_load'
-  | 'no_rest'
-  | 'without_task'
-  | 'declined'
-  | 'inactive_person'
+export type AlertType
+  = | 'vacancy'
+    | 'unavailable'
+    | 'not_qualified'
+    | 'exceptional'
+    | 'clash'
+    | 'same_day_load'
+    | 'no_rest'
+    | 'without_task'
+    | 'declined'
+    | 'inactive_person'
 
 export interface Alert {
   type: AlertType

@@ -2,17 +2,17 @@
 // (categoria "utility"), com {{n}} como variáveis. O app usa o mesmo texto para a
 // prévia e para o modo de simulação, para que a coordenação veja exatamente o conteúdo.
 
-export type MessageKind =
-  | 'invite'
-  | 'password_reset'
-  | 'availability_request'
-  | 'weekly_reminder'
-  | 'reminder_correction'
-  | 'schedule_published'
-  | 'schedule_change'
-  | 'swap_invite'
-  | 'music_notice'
-  | 'coordination_alert'
+export type MessageKind
+  = | 'invite'
+    | 'password_reset'
+    | 'availability_request'
+    | 'weekly_reminder'
+    | 'reminder_correction'
+    | 'schedule_published'
+    | 'schedule_change'
+    | 'swap_invite'
+    | 'music_notice'
+    | 'coordination_alert'
 
 export interface TemplateDefinition {
   kind: MessageKind

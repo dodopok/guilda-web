@@ -256,9 +256,9 @@ export async function listServices(db: Db, ctx: ChurchContext, month: string) {
   const rows = await db.select().from(services).where(and(eq(services.churchId, ctx.church.id), eq(services.month, month))).orderBy(asc(services.startsAt))
   const slotRows = rows.length
     ? await db.select({ slot: slots, dutyName: duties.name, dutyKind: duties.kind }).from(slots)
-      .innerJoin(duties, and(eq(duties.churchId, slots.churchId), eq(duties.id, slots.dutyId)))
-      .where(and(eq(slots.churchId, ctx.church.id), inArray(slots.serviceId, rows.map((r) => r.id))))
-      .orderBy(asc(slots.position))
+        .innerJoin(duties, and(eq(duties.churchId, slots.churchId), eq(duties.id, slots.dutyId)))
+        .where(and(eq(slots.churchId, ctx.church.id), inArray(slots.serviceId, rows.map((r) => r.id))))
+        .orderBy(asc(slots.position))
     : []
   return rows.map((s) => ({
     ...s,

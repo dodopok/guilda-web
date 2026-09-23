@@ -8,7 +8,7 @@ import { badRequest, notFound } from '../lib/errors'
 import { formatDateShort, formatServiceDate, localParts, monthName } from '../lib/time'
 import { firstName } from '../lib/text'
 import { audit } from './audit'
-import { type ChurchContext, type ChurchRow, isCoordinator, requireCoordinator, requirePerson, systemContext } from './context'
+import { type ChurchContext, type ChurchRow, isCoordinator, requireCoordinator, requirePerson } from './context'
 import { enqueueMessage } from './messaging/outbox'
 
 export const requestSchema = z.object({
@@ -153,7 +153,7 @@ export async function getAvailabilityFor(db: Db, ctx: ChurchContext, month: stri
   const svc = await db.select().from(services).where(and(eq(services.churchId, ctx.church.id), eq(services.month, month), eq(services.status, 'scheduled'))).orderBy(asc(services.startsAt))
   const mine = svc.length
     ? await db.select({ serviceId: unavailabilities.serviceId }).from(unavailabilities)
-      .where(and(eq(unavailabilities.churchId, ctx.church.id), eq(unavailabilities.personId, target), inArray(unavailabilities.serviceId, svc.map((s) => s.id))))
+        .where(and(eq(unavailabilities.churchId, ctx.church.id), eq(unavailabilities.personId, target), inArray(unavailabilities.serviceId, svc.map((s) => s.id))))
     : []
   const response = req
     ? await db.query.availabilityResponses.findFirst({ where: and(eq(availabilityResponses.requestId, req.id), eq(availabilityResponses.personId, target)) })
@@ -299,4 +299,3 @@ export async function availabilityDashboard(db: Db, ctx: ChurchContext, month: s
     })),
   }
 }
-

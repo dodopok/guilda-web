@@ -1,7 +1,9 @@
 import { eq } from 'drizzle-orm'
 import { z } from 'zod'
 import type { Db } from '../db/client'
-import { accounts, churches, people, whatsappChannels } from '../db/schema'
+import { getConfig } from '../config'
+import { accounts, authTokens, churches, people, whatsappChannels } from '../db/schema'
+import { randomToken, sha256 } from '../lib/crypto'
 import { forbidden } from '../lib/errors'
 import { normalizePhone } from '../lib/phone'
 import { nameKey } from '../lib/text'
@@ -53,8 +55,19 @@ export async function createChurch(db: Db, actor: Actor, input: z.infer<typeof c
       roles: ['coordinator', 'participant'],
       accountId: actorAccount?.login === phone ? actorAccount.id : null,
     }).returning()
+    // Primeiro convite: não há ainda coordenação com acesso nem canal configurado, então o
+    // link é devolvido uma única vez à administração para ser entregue pessoalmente.
+    let inviteLink: string | null = null
+    if (!coordinator!.accountId) {
+      const token = randomToken(32)
+      await tx.insert(authTokens).values({
+        purpose: 'invite', tokenHash: sha256(token), churchId: church!.id, personId: coordinator!.id,
+        createdByAccountId: actor.accountId, expiresAt: new Date(Date.now() + 72 * 3600_000),
+      })
+      inviteLink = `${getConfig().appBaseUrl}/convite/${token}`
+    }
     await audit(tx, { churchId: church!.id, actorAccountId: actor.accountId, action: 'church.created', entityType: 'church', entityId: church!.id })
-    return { church: church!, coordinatorPersonId: coordinator!.id }
+    return { church: church!, coordinatorPersonId: coordinator!.id, inviteLink }
   })
 }
 
