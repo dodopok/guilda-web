@@ -58,7 +58,7 @@ const journey = computed(() => {
 })
 const nowStep = computed(() => journey.value.find((j) => j.state === 'now')?.n ?? (prep.value?.schedule.status === 'published' ? 4 : 3))
 const published = computed(() => prep.value?.schedule.status === 'published')
-const ctaLabel = computed(() => (published.value ? 'Ver a escala publicada' : nowStep.value === 1 ? 'Continuar: marcar os cultos' : nowStep.value === 2 ? 'Continuar: perguntar quem não pode' : nowStep.value === 3 ? 'Continuar: montar a escala' : 'Continuar: publicar'))
+const ctaLabel = computed(() => (published.value ? 'Ver ou mudar a escala' : nowStep.value === 1 ? 'Continuar: marcar os cultos' : nowStep.value === 2 ? 'Continuar: perguntar quem não pode' : nowStep.value === 3 ? 'Continuar: montar a escala' : 'Continuar: publicar'))
 const ctaTo = computed(() => (published.value ? link(`/escala/${prep.value!.month}`) : link(`/coordenacao/preparar/${prep.value!.month}?passo=${nowStep.value}`)))
 const substituteLink = (d: Declined) => link(`/coordenacao/preparar/${localDateKey(d.startsAt, tz.value).slice(0, 7)}?passo=3&culto=${d.serviceId}`)
 const waMode = computed(() => info.value?.whatsappMode ?? data.value?.overview.whatsapp.mode)

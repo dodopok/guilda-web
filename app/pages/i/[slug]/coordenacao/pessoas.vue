@@ -665,6 +665,7 @@ watch(personId, () => (dataOpen.value = false))
     <!-- Função -->
     <Sheet
       v-model:open="dutyOpen"
+      placement="right"
       :label="duty?.name"
     >
       <template
@@ -765,6 +766,7 @@ watch(personId, () => (dataOpen.value = false))
 
     <Sheet
       v-model:open="newDutyOpen"
+      placement="right"
       title="Nova função"
       lede="Ela entra nos cultos e você marca quem pode fazer."
     >

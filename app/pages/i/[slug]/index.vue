@@ -7,13 +7,20 @@ const { capi, link, tz, info, isCoordinator } = useChurch()
 const { me } = useSession()
 const { data, refresh, error } = await useAsyncData(`home-${route.params.slug}`, () => capi<HomeResponse>('/me/home'))
 const { respond, busy } = useRespond(refresh)
+interface Candidate { personId: string, displayName: string }
 
 const declining = ref<Task | null>(null)
-async function decline(note: string) {
+const declineBusy = ref(false)
+async function decline(candidate?: Candidate) {
   const t = declining.value
   if (!t) return
-  await respond(t, 'declined', note)
-  declining.value = null
+  declineBusy.value = true
+  try {
+    const message = candidate ? `A coordenação foi avisada e ${candidate.displayName.split(' ')[0]} recebeu um pedido para assumir.` : undefined
+    if (await respond(t, 'declined', undefined, message, candidate?.personId)) declining.value = null
+  } finally {
+    declineBusy.value = false
+  }
 }
 
 const firstName = computed(() => (me.value?.account.displayName ?? '').replace(/^(Pr|Pra|Rev|Revda?)\.\s*/i, '').split(' ')[0] ?? '')
@@ -419,7 +426,7 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 
     <DeclineSheet
       :task="declining"
-      :busy="Boolean(busy)"
+      :busy="Boolean(busy) || declineBusy"
       @close="declining = null"
       @decline="decline"
     />

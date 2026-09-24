@@ -5,7 +5,7 @@ import type { Db, DbOrTx } from '../db/client'
 import { accounts, authTokens, churchLogos, churches, consents, people, sessions } from '../db/schema'
 import { burnPasswordCheck, hashPassword, randomToken, safeEqual, sha256, verifyPassword } from '../lib/crypto'
 import { AppError, badRequest, notFound, unauthorized } from '../lib/errors'
-import { normalizePhone } from '../lib/phone'
+import { maskPhone, normalizePhone } from '../lib/phone'
 import { firstName } from '../lib/text'
 import { audit } from './audit'
 import { type ChurchContext, requireCoordinator } from './context'
@@ -219,6 +219,10 @@ export async function describeInvite(db: Db, token: string) {
     firstName: firstName(person.displayName),
     expiresAt: row.expiresAt,
     accountExists: Boolean(existing),
+    phoneMasked: maskPhone(person.phoneE164),
+    reminderEnabled: church.reminderEnabled,
+    reminderWeekday: church.reminderWeekday,
+    reminderTime: church.reminderTime,
   }
 }
 

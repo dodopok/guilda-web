@@ -439,3 +439,21 @@ test('papéis: cadastrar pastor(a) que também coordena e filtrar', async ({ bro
   await expect(row).toContainText('Coordenação · Pastor(a)')
   await coord.context().close()
 })
+
+test('escala da igreja: coordenação vê onde mudar; participante só lê', async ({ browser }) => {
+  const month = nextMonth()
+  const coord = await as(browser, PHONES.coord)
+  await coord.goto(`/i/porto/escala/${month}`)
+  await expect(coord.getByText('É assim que a igreja vê a escala.')).toBeVisible()
+  await coord.getByRole('link', { name: /^Mudar a escala de / }).first().click()
+  await expect(coord).toHaveURL(new RegExp(`/coordenacao/preparar/${month}\\?passo=3&culto=[0-9a-f-]{36}$`))
+  await expect(coord.getByText('Escala já publicada.')).toBeVisible()
+  await coord.context().close()
+
+  const alice = await as(browser, PHONES.alice)
+  await alice.goto(`/i/porto/escala/${month}`)
+  await expect(alice.getByRole('heading', { level: 1 })).toBeVisible()
+  await expect(alice.getByText('É assim que a igreja vê a escala.')).toHaveCount(0)
+  await expect(alice.getByRole('link', { name: /Mudar/ })).toHaveCount(0)
+  await alice.context().close()
+})

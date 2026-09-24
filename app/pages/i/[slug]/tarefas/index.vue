@@ -4,7 +4,8 @@ import type { Task } from '~/types'
 useHead({ title: 'Suas escalas' })
 const route = useRoute()
 const { capi, tz, link } = useChurch()
-const { data } = await useAsyncData(`my-tasks-${route.params.slug}`, () => capi<{ tasks: Task[] }>('/me/tasks?past=1'))
+const { data, refresh } = await useAsyncData(`my-tasks-${route.params.slug}`, () => capi<{ tasks: Task[] }>('/me/tasks?past=1'))
+const { respond, busy } = useRespond(refresh)
 const now = Date.now()
 const upcoming = computed(() => (data.value?.tasks ?? []).filter((t) => new Date(t.service.startsAt).getTime() >= now))
 const past = computed(() => (data.value?.tasks ?? []).filter((t) => new Date(t.service.startsAt).getTime() < now).reverse())
@@ -35,41 +36,55 @@ function sub(t: Task) {
         {{ g.label }}
       </p>
       <div class="card card--flush rows">
-        <NuxtLink
+        <div
           v-for="t in g.items"
           :key="t.assignmentId"
-          :to="link(`/tarefas/${t.assignmentId}`)"
-          class="listrow"
+          class="task-listrow"
         >
-          <span
-            style="width:44px;text-align:center;flex:none"
-            aria-hidden="true"
+          <NuxtLink
+            :to="link(`/tarefas/${t.assignmentId}`)"
+            class="task-listrow__link"
           >
             <span
-              class="muted"
-              style="display:block;font-size:11px;font-weight:800;text-transform:uppercase"
-            >{{ weekdayShort(t.service.startsAt, tz) }}</span>
-            <span style="display:block;font-size:20px;font-weight:800;line-height:1">{{ dayNumber(t.service.startsAt, tz) }}</span>
-          </span>
-          <span style="flex:1;min-width:0">
+              style="width:44px;text-align:center;flex:none"
+              aria-hidden="true"
+            >
+              <span
+                class="muted"
+                style="display:block;font-size:11px;font-weight:800;text-transform:uppercase"
+              >{{ weekdayShort(t.service.startsAt, tz) }}</span>
+              <span style="display:block;font-size:20px;font-weight:800;line-height:1">{{ dayNumber(t.service.startsAt, tz) }}</span>
+            </span>
+            <span style="flex:1;min-width:0">
+              <span
+                class="strong"
+                style="display:block"
+              >{{ t.duty.name }}<span class="sr-only">, {{ longDate(t.service.startsAt, tz) }}</span></span>
+              <span
+                class="soft"
+                style="display:block;font-size:13.5px"
+              >{{ sub(t) }}</span>
+            </span>
             <span
-              class="strong"
-              style="display:block"
-            >{{ t.duty.name }}<span class="sr-only">, {{ longDate(t.service.startsAt, tz) }}</span></span>
-            <span
-              class="soft"
-              style="display:block;font-size:13.5px"
-            >{{ sub(t) }}</span>
-          </span>
-          <span
-            class="stag"
-            :style="{ background: tag(t, g.past).bg, color: tag(t, g.past).fg }"
-          >{{ tag(t, g.past).label }}</span>
-          <Icon
-            name="chevron-right"
-            class="listrow__chev"
-          />
-        </NuxtLink>
+              class="stag"
+              :style="{ background: tag(t, g.past).bg, color: tag(t, g.past).fg }"
+            >{{ tag(t, g.past).label }}</span>
+            <Icon
+              name="chevron-right"
+              class="listrow__chev"
+            />
+          </NuxtLink>
+          <button
+            v-if="!g.past && t.status === 'pending'"
+            type="button"
+            class="btn btn--secondary btn--xs task-listrow__confirm"
+            :disabled="busy === t.assignmentId"
+            :aria-label="`Confirmar ${t.duty.name}, ${longDate(t.service.startsAt, tz)}`"
+            @click="respond(t, 'confirmed')"
+          >
+            {{ busy === t.assignmentId ? 'Salvando…' : 'Confirmar' }}
+          </button>
+        </div>
       </div>
     </div>
     <div
