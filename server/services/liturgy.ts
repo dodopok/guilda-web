@@ -24,7 +24,7 @@ import { badRequest, forbidden, notFound } from '../lib/errors'
 import { formatServiceDate, localParts } from '../lib/time'
 import { firstName, nameKey } from '../lib/text'
 import { EstevaoError, fetchLiturgicalDay, type LiturgicalSuggestion, sundayTitle } from '../integrations/estevao'
-import { searchCifraClub, SongSearchError } from '../integrations/cifraclub'
+import { isCifraLink, lookupCifraKey, searchCifraClub, SongSearchError } from '../integrations/cifraclub'
 import { audit } from './audit'
 import { type ChurchContext, isCoordinator, isPastor, requireCoordinator } from './context'
 import { enqueueMessage } from './messaging/outbox'
@@ -178,39 +178,121 @@ function slotFromTitle(title: string) {
   return READING_SLOTS.find((x) => nameKey(x.title) === k)?.slot
 }
 
+type TemplateBlockRow = typeof templateBlocks.$inferSelect
+type NewScriptBlock = { type: string, title: string, body: string | null, textSource: string, dutyId: string | null, personId: string | null, data: ScriptBlockData }
+
+// Blocos do roteiro a partir do modelo (sem nada preenchido ainda).
+function blocksFromTemplate(blocks: TemplateBlockRow[], fixedItems: NonNullable<ScriptBlockData['items']>): NewScriptBlock[] {
+  return blocks.map((b) => ({
+    type: b.type,
+    title: b.title,
+    body: b.body,
+    textSource: b.textSource,
+    dutyId: b.dutyId,
+    personId: null,
+    data: b.type === 'announcements' && fixedItems.length
+      ? { items: fixedItems }
+      : b.type === 'rite' || b.type === 'text'
+        ? { templateBody: b.body }
+        : (b.type === 'reading' || b.type === 'psalm') && slotFromTitle(b.title) ? { slot: slotFromTitle(b.title) } : {},
+  }))
+}
+
+async function loadTemplateBlocks(tx: DbOrTx, ctx: ChurchContext, templateId: string) {
+  const t = await tx.query.liturgyTemplates.findFirst({ where: and(eq(liturgyTemplates.churchId, ctx.church.id), eq(liturgyTemplates.id, templateId)) })
+  if (!t) throw badRequest('invalid_template', 'Modelo inexistente nesta igreja.')
+  return tx.select().from(templateBlocks).where(and(eq(templateBlocks.churchId, ctx.church.id), eq(templateBlocks.templateId, templateId))).orderBy(asc(templateBlocks.position))
+}
+
 export async function createScript(db: Db, ctx: ChurchContext, serviceId: string, templateId?: string | null) {
   requireCoordinator(ctx)
   return db.transaction(async (tx) => {
     const service = await loadService(tx, ctx, serviceId)
     const existing = await loadScript(tx, ctx, serviceId)
     if (existing) throw badRequest('script_exists', 'Este culto já tem roteiro.')
-    let blocks: (typeof templateBlocks.$inferSelect)[] = []
-    if (templateId) {
-      const t = await tx.query.liturgyTemplates.findFirst({ where: and(eq(liturgyTemplates.churchId, ctx.church.id), eq(liturgyTemplates.id, templateId)) })
-      if (!t) throw badRequest('invalid_template', 'Modelo inexistente nesta igreja.')
-      blocks = await tx.select().from(templateBlocks).where(and(eq(templateBlocks.churchId, ctx.church.id), eq(templateBlocks.templateId, templateId))).orderBy(asc(templateBlocks.position))
-    }
+    const blocks = templateId ? await loadTemplateBlocks(tx, ctx, templateId) : []
     const [script] = await tx.insert(serviceScripts).values({
       churchId: ctx.church.id,
       serviceId,
       templateId: templateId ?? null,
+      templateAppliedAt: templateId ? new Date() : null,
       title: service.title,
     }).returning()
     // Avisos marcados como "todo domingo" no roteiro mais recente voltam automaticamente.
     const fixedItems = blocks.some((b) => b.type === 'announcements') ? await latestFixedAnnouncements(tx, ctx.church.id, serviceId) : []
     if (blocks.length) {
-      await tx.insert(scriptBlocks).values(blocks.map((b, i) => ({
-        churchId: ctx.church.id, scriptId: script!.id, position: i, type: b.type, title: b.title, body: b.body, textSource: b.textSource, dutyId: b.dutyId,
-        data: b.type === 'announcements' && fixedItems.length
-          ? { items: fixedItems }
-          : b.type === 'rite' || b.type === 'text'
-            ? { templateBody: b.body }
-            : (b.type === 'reading' || b.type === 'psalm') && slotFromTitle(b.title) ? { slot: slotFromTitle(b.title) } : {},
-      })))
+      await tx.insert(scriptBlocks).values(blocksFromTemplate(blocks, fixedItems).map((b, i) => ({ ...b, churchId: ctx.church.id, scriptId: script!.id, position: i })))
     }
     await audit(tx, { churchId: ctx.church.id, actorAccountId: ctx.accountId, action: 'script.created', entityType: 'script', entityId: script!.id, data: { templateId } })
     return script!
   })
+}
+
+// "Refazer pelo modelo": troca a ordem e os blocos pelos do modelo, levando o que já foi
+// preenchido (nome do domingo, coleta, leituras e quem lê, pregador, músicas, avisos e
+// ritos adaptados). O publicado só muda quando a coordenação publicar de novo.
+export async function rebuildFromTemplate(db: Db, ctx: ChurchContext, serviceId: string, templateId: string) {
+  requireCoordinator(ctx)
+  await db.transaction(async (tx) => {
+    const script = await loadScript(tx, ctx, serviceId)
+    if (!script) throw notFound('Roteiro')
+    const tpl = await loadTemplateBlocks(tx, ctx, templateId)
+    const old = await tx.select().from(scriptBlocks).where(and(eq(scriptBlocks.churchId, ctx.church.id), eq(scriptBlocks.scriptId, script.id))).orderBy(asc(scriptBlocks.position))
+    const snap = script.liturgicalSnapshotId
+      ? await tx.query.liturgicalSnapshots.findFirst({ where: and(eq(liturgicalSnapshots.churchId, ctx.church.id), eq(liturgicalSnapshots.id, script.liturgicalSnapshotId)) })
+      : null
+    const suggestion = snap ? snap.payload as unknown as LiturgicalSuggestion : null
+    const oldAnnouncements = old.find((b) => b.type === 'announcements')
+    const fixed = oldAnnouncements ? [] : await latestFixedAnnouncements(tx, ctx.church.id, serviceId)
+    const used = new Set<string>()
+    const take = (pred: (b: typeof old[number]) => boolean) => {
+      const hit = old.find((b) => !used.has(b.id) && pred(b))
+      if (hit) used.add(hit.id)
+      return hit
+    }
+    const slotOfOld = (b: typeof old[number]) => (b.data.slot ? canonicalSlot(b.data.slot) : slotFromTitle(b.title))
+    const next = blocksFromTemplate(tpl, fixed).map((b) => {
+      if (b.type === 'heading' && b.textSource === 'estevao') {
+        const prev = take((o) => o.type === 'heading' && o.textSource === 'estevao')
+        const name = prev?.title ?? (suggestion ? sundayTitle(suggestion) : null)
+        return name ? { ...b, title: name } : b
+      }
+      if (b.type === 'collect') {
+        const prev = take((o) => o.type === 'collect')
+        return prev?.body ? { ...b, title: prev.title, body: prev.body, textSource: prev.textSource, data: prev.data } : b
+      }
+      if (b.type === 'reading' || b.type === 'psalm') {
+        const prev = take((o) => (o.type === 'reading' || o.type === 'psalm') && slotOfOld(o) === b.data.slot)
+        if (prev) return { ...b, title: prev.title, personId: prev.personId, dutyId: prev.dutyId ?? b.dutyId, data: { ...prev.data, slot: b.data.slot } }
+        const fromDay = suggestion?.readings.find((r) => canonicalSlot(r.key) === b.data.slot)
+        return fromDay ? { ...b, title: fromDay.label, textSource: 'estevao', data: { ...b.data, reference: fromDay.reference, source: 'estevao' as const, ...(fromDay.alternatives.length ? { alternatives: fromDay.alternatives } : {}) } } : b
+      }
+      if (b.type === 'music') {
+        const prev = take((o) => o.type === 'music')
+        return prev ? { ...b, data: { ...b.data, songIds: prev.data.songIds, songKeys: prev.data.songKeys } } : b
+      }
+      if (b.type === 'announcements') {
+        const prev = take((o) => o.type === 'announcements')
+        return prev ? { ...b, data: { ...b.data, items: prev.data.items } } : b
+      }
+      if (b.type === 'sermon') {
+        const prev = take((o) => o.type === 'sermon')
+        return prev ? { ...b, personId: prev.personId } : b
+      }
+      if (b.type === 'rite' || b.type === 'text') {
+        // Rito adaptado neste culto (texto diferente do modelo de origem) continua adaptado.
+        const prev = take((o) => o.type === b.type && nameKey(o.title) === nameKey(b.title))
+        const adapted = prev && prev.body !== (prev.data.templateBody ?? null)
+        return prev ? { ...b, personId: prev.personId, body: adapted ? prev.body : b.body } : b
+      }
+      return b
+    })
+    await tx.delete(scriptBlocks).where(and(eq(scriptBlocks.churchId, ctx.church.id), eq(scriptBlocks.scriptId, script.id)))
+    if (next.length) await tx.insert(scriptBlocks).values(next.map((b, i) => ({ ...b, churchId: ctx.church.id, scriptId: script.id, position: i })))
+    await tx.update(serviceScripts).set({ templateId, templateAppliedAt: new Date(), updatedAt: new Date() }).where(eq(serviceScripts.id, script.id))
+    await audit(tx, { churchId: ctx.church.id, actorAccountId: ctx.accountId, action: 'script.rebuilt_from_template', entityType: 'script', entityId: script.id, data: { templateId, dropped: old.filter((b) => !used.has(b.id)).map((b) => b.title) } })
+  })
+  return getScript(db, ctx, serviceId)
 }
 
 async function latestFixedAnnouncements(db: DbOrTx, churchId: string, exceptServiceId: string) {
@@ -290,6 +372,15 @@ export async function getScript(db: Db, ctx: ChurchContext, serviceId: string) {
   const snapshot = script.liturgicalSnapshotId
     ? await db.query.liturgicalSnapshots.findFirst({ where: and(eq(liturgicalSnapshots.churchId, ctx.church.id), eq(liturgicalSnapshots.id, script.liturgicalSnapshotId)) })
     : null
+  const template = script.templateId
+    ? await db.query.liturgyTemplates.findFirst({ where: and(eq(liturgyTemplates.churchId, ctx.church.id), eq(liturgyTemplates.id, script.templateId)) })
+    : null
+  // Funções do roteiro escaladas neste culto que nenhum bloco mostra (apoio fica de fora).
+  const covered = new Set(blocks.map((b) => b.dutyId).filter(Boolean))
+  const serviceDuties = await db.selectDistinct({ id: duties.id, name: duties.name, position: duties.position }).from(slots)
+    .innerJoin(duties, and(eq(duties.churchId, slots.churchId), eq(duties.id, slots.dutyId)))
+    .where(and(eq(slots.churchId, ctx.church.id), eq(slots.serviceId, serviceId), eq(duties.inScript, true)))
+  const dutiesOutside = serviceDuties.filter((d) => !covered.has(d.id)).sort((a, b) => a.position - b.position).map((d) => ({ id: d.id, name: d.name }))
   return {
     ...base,
     draft: {
@@ -302,6 +393,10 @@ export async function getScript(db: Db, ctx: ChurchContext, serviceId: string) {
       pastoralNote: script.pastoralNote,
       musicChooser: script.musicChooser,
       updatedAt: script.updatedAt,
+      template: template
+        ? { id: template.id, name: template.name, archived: template.archived, changedSince: template.updatedAt > (script.templateAppliedAt ?? script.createdAt) }
+        : null,
+      dutiesOutside,
       snapshot: snapshot ? { id: snapshot.id, source: snapshot.source, fetchedAt: snapshot.fetchedAt, requestPath: snapshot.requestPath, prayerBook: snapshot.prayerBook } : null,
       blocks: blocks.map((b) => ({
         id: b.id,
@@ -634,6 +729,22 @@ export async function updateSong(db: Db, ctx: ChurchContext, id: string, input: 
   const [row] = await db.update(songs).set(input).where(and(eq(songs.churchId, ctx.church.id), eq(songs.id, id))).returning()
   if (!row) throw notFound('Música')
   return row
+}
+
+// Tenta ler o tom original na página da cifra. Só preenche quando o repertório ainda não
+// tem tom: o que a igreja digitou vale mais do que a cifra.
+export async function lookupSongKey(db: Db, ctx: ChurchContext, id: string, fetchImpl?: typeof fetch) {
+  if (!(await canManageSongs(db, ctx))) throw forbidden()
+  const song = await db.query.songs.findFirst({ where: and(eq(songs.churchId, ctx.church.id), eq(songs.id, id)) })
+  if (!song) throw notFound('Música')
+  if (!isCifraLink(song.link)) return { song, keyLookup: { status: 'not_found' as const, reason: 'A música não tem link de cifra do Cifra Club.' } }
+  const cfg = getConfig().songSearch
+  const keyLookup = await lookupCifraKey({ url: cfg.url, pageBase: cfg.pageBase, timeoutMs: cfg.timeoutMs, fetchImpl }, song.link!)
+  if (keyLookup.status === 'found' && !song.musicalKey) {
+    const [row] = await db.update(songs).set({ musicalKey: keyLookup.key }).where(and(eq(songs.churchId, ctx.church.id), eq(songs.id, id))).returning()
+    return { song: row!, keyLookup }
+  }
+  return { song, keyLookup }
 }
 
 // Busca no Cifra Club para quem escolhe músicas. Falha na busca não impede usar o repertório.

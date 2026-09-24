@@ -59,6 +59,7 @@ export async function makeChurch(db: Db, slug: string, opts: { withAccounts?: bo
       churchId: church!.id, ministryId: ms[def.ministry]!, name: def.name, kind: def.kind, position: i,
       defaultRequiredCount: def.required ?? 1, receivesMusicNotice: def.music ?? false, arrivalMinutesBefore: def.arrival ?? null,
       instructions: `Instruções de ${def.name}.`,
+      inScript: def.kind !== 'general' || def.ministry === 'Liturgia',
     }).returning()
     d[def.key] = row!.id
   }

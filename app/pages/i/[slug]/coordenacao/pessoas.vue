@@ -165,11 +165,11 @@ async function saveNew() {
 const dutyId = ref<string | null>(null)
 const duty = computed(() => data.value?.duties.find((d) => d.id === dutyId.value) ?? null)
 const dutyOpen = computed({ get: () => Boolean(dutyId.value), set: (v) => { if (!v) dutyId.value = null } })
-const dform = reactive({ name: '', instructions: '', required: 1, arrival: '' as string | number, musicNotice: false })
+const dform = reactive({ name: '', instructions: '', required: 1, arrival: '' as string | number, musicNotice: false, inScript: true })
 function openDuty(id: string) {
   dutyId.value = id
   const d = data.value?.duties.find((x) => x.id === id)
-  Object.assign(dform, { name: d?.name ?? '', instructions: d?.instructions ?? '', required: d?.defaultRequiredCount ?? 1, arrival: d?.arrivalMinutesBefore ?? '', musicNotice: d?.receivesMusicNotice ?? false })
+  Object.assign(dform, { name: d?.name ?? '', instructions: d?.instructions ?? '', required: d?.defaultRequiredCount ?? 1, arrival: d?.arrivalMinutesBefore ?? '', musicNotice: d?.receivesMusicNotice ?? false, inScript: d?.inScript ?? true })
 }
 const qualified = computed(() => (data.value?.people ?? []).filter((p) => p.status === 'active' && dutyId.value && p.dutyIds.includes(dutyId.value)))
 const ministryName = (id: string) => data.value?.ministries.find((m) => m.id === id)?.name ?? ''
@@ -182,7 +182,7 @@ async function saveDuty() {
   if (!d) return
   try {
     const arrival = dform.arrival === '' ? null : Number(dform.arrival)
-    await capi(`/duties/${d.id}`, { method: 'PATCH', body: { name: dform.name.trim(), instructions: dform.instructions.trim() || null, defaultRequiredCount: Math.max(1, Number(dform.required) || 1), arrivalMinutesBefore: arrival, receivesMusicNotice: dform.musicNotice } })
+    await capi(`/duties/${d.id}`, { method: 'PATCH', body: { name: dform.name.trim(), instructions: dform.instructions.trim() || null, defaultRequiredCount: Math.max(1, Number(dform.required) || 1), arrivalMinutesBefore: arrival, receivesMusicNotice: dform.musicNotice, inScript: dform.inScript } })
     toast.ok('Função salva. Vale para os próximos cultos criados.')
     dutyId.value = null
     await refresh()
@@ -719,6 +719,12 @@ watch(personId, () => (dataOpen.value = false))
             placeholder="a combinar"
           ></label>
         </div>
+        <SwitchRow
+          v-model="dform.inScript"
+          title="Aparece no roteiro do culto"
+          sub="Liga para liturgia, leituras, pregação e louvor. Desliga para apoio (café, mídia, lojinha): fica só na escala."
+          boxed
+        />
         <SwitchRow
           v-model="dform.musicNotice"
           title="Recebe o aviso das músicas"

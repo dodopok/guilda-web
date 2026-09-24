@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Song } from '~/types'
+import { isCifraLink, type SongHit } from '~/composables/useSongSearch'
 
 // Escolha de músicas: sugere do repertório da igreja e busca no Cifra Club. A música
 // escolhida pela busca entra no repertório (título, artista e link). O tom deste culto
@@ -24,51 +25,23 @@ const results = computed(() => (q.value
   ? all.value.filter((s) => !props.modelValue.includes(s.id) && (s.title.toLowerCase().includes(q.value) || (s.author ?? '').toLowerCase().includes(q.value))).slice(0, 5)
   : []))
 
-interface Hit { title: string, artist: string, link: string }
-const hits = ref<Hit[]>([])
-const searching = ref(false)
-const searchNote = ref('')
-let timer: ReturnType<typeof setTimeout> | undefined
-let seq = 0
-watch(q, () => {
-  clearTimeout(timer)
-  hits.value = []
-  searchNote.value = ''
-  const v = query.value.trim()
-  if (v.length < 3) return
-  timer = setTimeout(async () => {
-    const mine = ++seq
-    searching.value = true
-    try {
-      const r = await capi<{ available: boolean, reason?: string, hits: Hit[] }>(`/songs/search?q=${encodeURIComponent(v)}`)
-      if (mine !== seq) return
-      hits.value = r.hits.filter((h) => !all.value.some((s) => s.link === h.link && props.modelValue.includes(s.id)))
-      if (!r.available) searchNote.value = 'A busca no Cifra Club não respondeu agora. O repertório continua disponível.'
-    } catch {
-      if (mine === seq) searchNote.value = 'A busca no Cifra Club não respondeu agora. O repertório continua disponível.'
-    } finally {
-      if (mine === seq) searching.value = false
-    }
-  }, 400)
-})
-onBeforeUnmount(() => clearTimeout(timer))
+const { hits: rawHits, searching, note: searchNote, adding, addHit: saveHit, reading, readKey: lookupKey } = useSongSearch(query)
+async function readKey(s: Song) {
+  const song = await lookupKey(s)
+  if (song) local.value = [song, ...local.value.filter((x) => x.id !== song.id)]
+}
+// Cifra já escolhida neste culto não aparece de novo.
+const hits = computed(() => rawHits.value.filter((h) => !all.value.some((s) => s.link === h.link && props.modelValue.includes(s.id))))
 
 function add(id: string) {
   emit('update:modelValue', [...props.modelValue, id])
   query.value = ''
 }
-const adding = ref(false)
-async function addHit(h: Hit) {
-  adding.value = true
-  try {
-    const r = await capi<{ song: Song }>('/songs', { method: 'POST', body: { title: h.title, author: h.artist, link: h.link } })
-    local.value = [r.song, ...local.value.filter((s) => s.id !== r.song.id)]
-    add(r.song.id)
-  } catch (e) {
-    toast.error(e)
-  } finally {
-    adding.value = false
-  }
+async function addHit(h: SongHit) {
+  const song = await saveHit(h)
+  if (!song) return
+  local.value = [song, ...local.value.filter((s) => s.id !== song.id)]
+  add(song.id)
 }
 function remove(id: string) {
   emit('update:modelValue', props.modelValue.filter((x) => x !== id))
@@ -101,7 +74,6 @@ async function saveOriginal(s: Song) {
 const KEYS = ['C', 'C#', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B']
 const listId = `song-keys-${useId()}`
 const origLine = (s: Song) => [s.author, s.musicalKey ? `original ${s.musicalKey}` : 'tom original não informado'].filter(Boolean).join(' · ')
-const isCifra = (link: string | null) => Boolean(link && /^https:\/\/www\.cifraclub\.com\.br\//.test(link))
 </script>
 
 <template>
@@ -153,13 +125,20 @@ const isCifra = (link: string | null) => Boolean(link && /^https:\/\/www\.cifrac
               rel="noopener noreferrer"
               class="strong"
               style="color:var(--accent-deep)"
-            >{{ isCifra(s.link) ? 'Abrir cifra' : 'Abrir link' }}<span class="sr-only"> de {{ s.title }} (abre em outra aba)</span></a>
+            >{{ isCifraLink(s.link) ? 'Abrir cifra' : 'Abrir link' }}<span class="sr-only"> de {{ s.title }} (abre em outra aba)</span></a>
             <button
               v-if="!s.musicalKey && keyOf(s.id)"
               type="button"
               class="linkbtn"
               @click="saveOriginal(s)"
             >Guardar {{ keyOf(s.id) }} como tom original</button>
+            <button
+              v-else-if="!s.musicalKey && isCifraLink(s.link)"
+              type="button"
+              class="linkbtn"
+              :disabled="reading === s.id"
+              @click="readKey(s)"
+            >{{ reading === s.id ? 'Lendo o tom…' : 'Ler tom da cifra' }}</button>
           </span>
         </span>
         <label class="songrow__key">

@@ -120,6 +120,50 @@ function add(kind: TemplateKindKey) {
   openKey.value = key
 }
 
+// Funções da escala (na ordem do culto) viram blocos: leitura → coleta e leituras do dia,
+// sermão, músicas e as demais como rito com quem faz já ligado.
+// Só funções que aparecem no roteiro (apoio como café ou mídia fica só na escala).
+const scaleDuties = computed(() => (data.value?.duties ?? []).filter((d) => d.includeByDefault && d.inScript).sort((a, b) => a.position - b.position))
+function itemForDuty(d: Duty): Item[] {
+  const base = { body: '', loc: false, dutyId: d.id, slots: [] as string[] }
+  if (d.kind === 'reading') {
+    const out: Item[] = []
+    if (!items.value.some((i) => i.kind === 'collect')) out.push({ ...base, key: newKey(), kind: 'collect', title: BLOCK_KINDS.collect.label, dutyId: null })
+    if (!items.value.some((i) => i.kind === 'readings')) out.push({ ...base, key: newKey(), kind: 'readings', title: 'Leituras do dia', slots: READING_SLOTS.map((x) => x.slot) })
+    return out
+  }
+  if (d.kind === 'sermon') return [{ ...base, key: newKey(), kind: 'sermon', title: d.name }]
+  if (d.kind === 'music') return [{ ...base, key: newKey(), kind: 'music', title: d.name }]
+  if (d.name.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().startsWith('aviso')) return [{ ...base, key: newKey(), kind: 'announcements', title: d.name }]
+  return [{ ...base, key: newKey(), kind: 'rite', title: d.name }]
+}
+const outside = computed(() => scaleDuties.value.filter((d) => !items.value.some((i) => i.dutyId === d.id)))
+function startFromScale() {
+  items.value = [{ key: newKey(), kind: 'sunday', title: 'Nome do domingo', body: '', loc: false, dutyId: null, slots: [] }]
+  for (const d of scaleDuties.value) items.value = [...items.value, ...itemForDuty(d)]
+}
+// Entra depois do último bloco de uma função que vem antes na escala.
+function addDuty(d: Duty) {
+  const pos = (id: string | null) => scaleDuties.value.find((x) => x.id === id)?.position
+  let at = 0
+  items.value.forEach((it, i) => {
+    const p = pos(it.dutyId)
+    if (p !== undefined && p <= d.position) at = i + 1
+    else if (it.kind === 'sunday' || it.kind === 'heading') at = Math.max(at, i + 1)
+  })
+  const added = itemForDuty(d)
+  if (!added.length) {
+    // Leituras já estão no modelo: só liga a função a elas.
+    const r = items.value.find((i) => i.kind === 'readings')
+    if (r) r.dutyId = d.id
+    return
+  }
+  const list = [...items.value]
+  list.splice(at, 0, ...added)
+  items.value = list
+  openKey.value = added.at(-1)!.key
+}
+
 const saving = ref(false)
 async function save() {
   if (form.name.trim().length < 2) {
@@ -382,7 +426,45 @@ async function save() {
       class="card--dashed soft"
       style="padding:24px 20px"
     >
-      Este modelo ainda não tem blocos. Comece acrescentando um.
+      <p>Este modelo ainda não tem blocos.</p>
+      <button
+        v-if="scaleDuties.length"
+        type="button"
+        class="btn btn--sm"
+        style="margin-top:12px"
+        @click="startFromScale"
+      >
+        Começar pelas funções da escala
+      </button>
+      <p
+        v-if="scaleDuties.length"
+        class="small muted"
+        style="margin-top:8px"
+      >
+        Cria um bloco para cada função ({{ scaleDuties.map((d) => d.name).join(', ') }}), na ordem da escala, mais nome do domingo, coleta e leituras do dia. Depois é só ajustar.
+      </p>
+    </div>
+
+    <div
+      v-if="items.length && outside.length"
+      class="tplbar tplbar--warn"
+    >
+      <p style="flex-basis:100%">
+        <span class="strong">Funções da escala fora deste modelo.</span> Quem está escalado nelas não aparece no roteiro. Toque para acrescentar:
+      </p>
+      <button
+        v-for="d in outside"
+        :key="d.id"
+        type="button"
+        class="chip"
+        @click="addDuty(d)"
+      >
+        <Icon
+          name="plus"
+          :weight="2.2"
+          style="width:14px;height:14px"
+        />{{ d.name }}
+      </button>
     </div>
 
     <button

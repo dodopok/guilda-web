@@ -209,6 +209,11 @@ export async function cancelSwap(db: Db, ctx: ChurchContext, swapId: string) {
 export async function respondToSwap(db: Db, ctx: ChurchContext, swapId: string, accept: boolean) {
   const me = requirePerson(ctx)
   const result = await db.transaction(async (tx) => {
+    // Ordem fixa de travas (designação, depois o pedido): duas aceitações de pedidos
+    // diferentes para a mesma vaga esperam uma pela outra em vez de travar em impasse.
+    const [peek] = await tx.select({ assignmentId: swapRequests.assignmentId }).from(swapRequests).where(and(eq(swapRequests.churchId, ctx.church.id), eq(swapRequests.id, swapId)))
+    if (!peek) throw notFound('Pedido de troca')
+    const a = accept ? await lockAssignment(tx, ctx.church.id, peek.assignmentId) : null
     const swaps = await tx.select().from(swapRequests).where(and(eq(swapRequests.churchId, ctx.church.id), eq(swapRequests.id, swapId))).for('update')
     const swap = swaps[0]
     if (!swap || swap.candidatePersonId !== me) throw notFound('Pedido de troca')
@@ -218,7 +223,6 @@ export async function respondToSwap(db: Db, ctx: ChurchContext, swapId: string, 
       await audit(tx, { churchId: ctx.church.id, actorAccountId: ctx.accountId, action: 'swap.rejected', entityType: 'swap', entityId: swap.id })
       return { swap: row!, month: null, change: null }
     }
-    const a = await lockAssignment(tx, ctx.church.id, swap.assignmentId)
     if (!a || a.personId !== swap.fromPersonId) {
       await tx.update(swapRequests).set({ status: 'superseded', respondedAt: new Date() }).where(eq(swapRequests.id, swap.id))
       throw conflict('swap_stale', 'A tarefa já foi assumida por outra pessoa ou mudou. Nada foi alterado.')

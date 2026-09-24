@@ -195,6 +195,9 @@ test('músicas: repertório e busca no Cifra Club, tom deste culto no aviso ao l
   await expect(coord.getByText('No Cifra Club')).toBeVisible()
   await coord.getByRole('button', { name: /Santo \(exemplo\).*Adicionar/ }).click()
   await expect(coord.getByRole('link', { name: /Abrir cifra/ })).toHaveAttribute('href', 'https://www.cifraclub.com.br/artista-de-exemplo/cancao-de-exemplo/')
+  // Tom original lido da página da cifra (simulada).
+  await expect(coord.getByText(/tom original G \(lido da cifra\)/)).toBeVisible()
+  await expect(coord.getByText('Artista de Exemplo · original G')).toBeVisible()
   await coord.getByRole('combobox', { name: 'Tom de Santo (exemplo) neste culto' }).fill('G')
   await coord.getByRole('combobox', { name: 'Tom de Santo (exemplo) neste culto' }).press('Tab')
   await coord.getByRole('button', { name: 'Salvar músicas e avisar o louvor' }).click()
@@ -203,7 +206,14 @@ test('músicas: repertório e busca no Cifra Club, tom deste culto no aviso ao l
   const music = view.draft.blocks.find((b) => b.type === 'music')!
   expect(Object.values(music.data.songKeys ?? {})).toEqual(['G'])
   const songs = await (await coord.request.get('/api/v1/churches/porto/songs')).json() as { songs: { id: string, title: string, link: string | null }[] }
-  expect(songs.songs.find((x) => x.id === music.data.songIds![0])).toMatchObject({ title: 'Santo (exemplo)', link: expect.stringContaining('cifraclub.com.br') })
+  expect(songs.songs.find((x) => x.id === music.data.songIds![0])).toMatchObject({ title: 'Santo (exemplo)', musicalKey: 'G', link: expect.stringContaining('cifraclub.com.br') })
+
+  // Repertório: a mesma busca, adicionando direto.
+  await coord.goto('/i/porto/coordenacao/repertorio')
+  await coord.getByRole('searchbox', { name: 'Buscar música' }).fill('Glória')
+  await coord.getByRole('button', { name: /Glória ao vivo \(exemplo\).*Adicionar ao repertório/ }).click()
+  await expect(coord.getByText(/“Glória ao vivo \(exemplo\)” no repertório, tom original G/)).toBeVisible()
+  await expect(coord.getByRole('button', { name: /Glória ao vivo \(exemplo\)/ })).toContainText('G')
   await coord.context().close()
 })
 
@@ -218,6 +228,12 @@ test('modelo de liturgia: título fixo, nome do domingo, rito do LOC e leituras 
     await coord.getByRole('button', { name: 'Acrescentar bloco' }).click()
     await coord.getByRole('button', { name: new RegExp(`^${label}`) }).click()
   }
+  // Modelo vazio começa pelas funções da escala.
+  await coord.getByRole('button', { name: 'Começar pelas funções da escala' }).click()
+  await expect(coord.getByText('Funções da escala fora deste modelo.')).toHaveCount(0)
+  await expect(coord.getByRole('button', { name: /^Tirar / })).not.toHaveCount(0)
+  while (await coord.getByRole('button', { name: /^Tirar / }).count()) await coord.getByRole('button', { name: /^Tirar / }).first().click()
+  await expect(coord.getByText('Funções da escala fora deste modelo.')).toHaveCount(0)
   await addBlock('Título')
   // Título é só texto: sem escolha de fonte.
   await expect(coord.getByText('É texto do Livro de Oração (LOC)')).toHaveCount(0)
@@ -243,6 +259,19 @@ test('modelo de liturgia: título fixo, nome do domingo, rito do LOC e leituras 
     ['psalm', 'Salmo', 'estevao'],
     ['reading', 'Evangelho', 'estevao'],
   ])
+
+  // Roteiro já criado: refazer pelo modelo novo.
+  const data = await editor(coord, nextMonth())
+  const svc = data.services.filter((x) => x.kind === 'regular')[3]!
+  await coord.goto(`/i/porto/roteiros/${svc.id}`)
+  await expect(coord.getByText(/Feito com o modelo/)).toBeVisible()
+  await coord.getByRole('button', { name: 'Refazer pelo modelo' }).click()
+  await coord.getByRole('radio', { name: /Modelo e2e/ }).check()
+  await coord.getByRole('button', { name: 'Refazer o roteiro' }).click()
+  await expect(coord.getByText(/Roteiro refeito pelo modelo/)).toBeVisible()
+  await expect(coord.getByText(/Feito com o modelo “Modelo e2e”/)).toBeVisible()
+  await expect(coord.getByText('Liturgia da Palavra')).toBeVisible()
+  await expect(coord.getByText(/Na escala, mas fora do roteiro:/)).toBeVisible()
   await coord.context().close()
 })
 
