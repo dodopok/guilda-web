@@ -81,7 +81,8 @@ async function assign(personId: string, reason?: { exceptionReason?: string, ove
   if (!s || !sl) return
   busy.value = true
   try {
-    await capi(`/slots/${sl.id}/assignments`, { method: 'POST', body: { personId, notifyNow: false, ...reason } })
+    // Escala já publicada: quem foi afetado recebe o aviso na hora.
+    await capi(`/slots/${sl.id}/assignments`, { method: 'POST', body: { personId, notifyNow: props.editor.status === 'published', ...reason } })
     const name = props.editor.people.find((p) => p.id === personId)?.displayName.split(' ')[0]
     toast.ok(`Pronto: ${name} em ${dutyName(sl.dutyId)}.`)
     allSlotId.value = null
@@ -98,7 +99,7 @@ async function assign(personId: string, reason?: { exceptionReason?: string, ove
 }
 async function unassign(assignmentId: string, slotId: string) {
   try {
-    await capi(`/assignments/${assignmentId}`, { method: 'DELETE', body: {} })
+    await capi(`/assignments/${assignmentId}`, { method: 'DELETE', body: { notifyNow: props.editor.status === 'published' } })
     curDuty.value = slotId
     emit('refresh')
   } catch (e) {
@@ -177,6 +178,13 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
       class="stack-md"
       style="flex:1 1 440px;min-width:0"
     >
+      <p
+        v-if="editor.status === 'published'"
+        class="coordbar"
+        style="font-size:14.5px"
+      >
+        <span><strong>Escala já publicada.</strong> Cada mudança aqui entra na escala de todos e avisa só quem foi afetado.</span>
+      </p>
       <div
         class="pills"
         role="group"

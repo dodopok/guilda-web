@@ -531,6 +531,9 @@ details > summary::-webkit-details-marker { display: none; }
 .tplrow__title { display: block; }
 .tplrow__sub { display: block; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Escala da igreja vista pela coordenação: aviso de onde se muda */
+.coordbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 14px 16px; border-radius: 18px; background: var(--accent-soft, #e6efe9); color: var(--accent-deep); font-size: 15px; }
+
 /* Roteiro: modelo de origem */
 .tplbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 12px 14px; border-radius: 16px; background: var(--surface-2); font-size: 14.5px; }
 .tplbar--warn { background: #fff4df; color: #5c3a00; }
