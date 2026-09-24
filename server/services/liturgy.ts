@@ -25,6 +25,7 @@ import { formatServiceDate, localParts } from '../lib/time'
 import { firstName, nameKey } from '../lib/text'
 import { EstevaoError, fetchLiturgicalDay, type LiturgicalSuggestion, sundayTitle } from '../integrations/estevao'
 import { isCifraLink, lookupCifraKey, searchCifraClub, SongSearchError } from '../integrations/cifraclub'
+import { parseRichText, type ResolvedLine, type ResolvedResponses, resolveResponses, whatsappRichText } from '../../shared/liturgy'
 import { audit } from './audit'
 import { type ChurchContext, isCoordinator, isPastor, requireCoordinator } from './context'
 import { enqueueMessage } from './messaging/outbox'
@@ -36,12 +37,17 @@ export const TEXT_SOURCES = ['church', 'loc_manual', 'estevao', 'other'] as cons
 // Modelos
 // ---------------------------------------------------------------------------
 
+const responseSchema = z.object({ on: z.boolean(), leader: z.string().trim().max(300), people: z.string().trim().max(300) })
+const responsesSchema = z.object({ open: responseSchema.optional(), close: responseSchema.optional(), deutero: responseSchema.optional() })
+
 const templateBlockSchema = z.object({
   type: z.enum(BLOCK_TYPES),
   title: z.string().trim().min(1).max(200),
   body: z.string().max(20000).nullable().optional(),
   textSource: z.enum(TEXT_SOURCES).default('church'),
   dutyId: z.string().uuid().nullable().optional(),
+  // Responsórios da leitura (só em leituras e salmo).
+  data: z.object({ responses: responsesSchema.optional() }).optional(),
 })
 
 export const templateSchema = z.object({
@@ -50,6 +56,11 @@ export const templateSchema = z.object({
   description: z.string().trim().max(1000).nullable().optional(),
   blocks: z.array(templateBlockSchema).max(200).optional(),
 })
+
+// Só leituras guardam responsórios.
+function templateData(b: z.infer<typeof templateBlockSchema>) {
+  return (b.type === 'reading' || b.type === 'psalm') && b.data?.responses ? { responses: b.data.responses } : {}
+}
 
 async function assertDuties(db: DbOrTx, churchId: string, ids: (string | null | undefined)[]) {
   const list = [...new Set(ids.filter((x): x is string => Boolean(x)))]
@@ -80,7 +91,7 @@ export async function createTemplate(db: Db, ctx: ChurchContext, input: z.infer<
     const [t] = await tx.insert(liturgyTemplates).values({ churchId: ctx.church.id, name: input.name, kind: input.kind, description: input.description ?? null }).returning()
     if (input.blocks?.length) {
       await tx.insert(templateBlocks).values(input.blocks.map((b, i) => ({
-        churchId: ctx.church.id, templateId: t!.id, position: i, type: b.type, title: b.title, body: b.body ?? null, textSource: b.textSource, dutyId: b.dutyId ?? null,
+        churchId: ctx.church.id, templateId: t!.id, position: i, type: b.type, title: b.title, body: b.body ?? null, textSource: b.textSource, dutyId: b.dutyId ?? null, data: templateData(b),
       })))
     }
     await audit(tx, { churchId: ctx.church.id, actorAccountId: ctx.accountId, action: 'template.created', entityType: 'template', entityId: t!.id })
@@ -105,7 +116,7 @@ export async function updateTemplate(db: Db, ctx: ChurchContext, id: string, inp
       await tx.delete(templateBlocks).where(and(eq(templateBlocks.churchId, ctx.church.id), eq(templateBlocks.templateId, id)))
       if (input.blocks.length) {
         await tx.insert(templateBlocks).values(input.blocks.map((b, i) => ({
-          churchId: ctx.church.id, templateId: id, position: i, type: b.type, title: b.title, body: b.body ?? null, textSource: b.textSource, dutyId: b.dutyId ?? null,
+          churchId: ctx.church.id, templateId: id, position: i, type: b.type, title: b.title, body: b.body ?? null, textSource: b.textSource, dutyId: b.dutyId ?? null, data: templateData(b),
         })))
       }
     }
@@ -130,7 +141,7 @@ export async function duplicateTemplate(db: Db, ctx: ChurchContext, id: string, 
     name: input.name,
     kind: input.kind ?? t.kind as 'regular',
     description: t.description,
-    blocks: t.blocks.map((b) => ({ type: b.type as typeof BLOCK_TYPES[number], title: b.title, body: b.body, textSource: b.textSource as typeof TEXT_SOURCES[number], dutyId: b.dutyId })),
+    blocks: t.blocks.map((b) => ({ type: b.type as typeof BLOCK_TYPES[number], title: b.title, body: b.body, textSource: b.textSource as typeof TEXT_SOURCES[number], dutyId: b.dutyId, data: b.data })),
   })
 }
 
@@ -202,7 +213,9 @@ function blocksFromTemplate(blocks: TemplateBlockRow[], fixedItems: NonNullable<
       ? { items: fixedItems }
       : b.type === 'rite' || b.type === 'text'
         ? { templateBody: b.body }
-        : (b.type === 'reading' || b.type === 'psalm') && slotFromTitle(b.title) ? { slot: slotFromTitle(b.title) } : {},
+        : b.type === 'reading' || b.type === 'psalm'
+          ? { ...(slotFromTitle(b.title) ? { slot: slotFromTitle(b.title) } : {}), ...(b.data?.responses ? { responses: b.data.responses } : {}) }
+          : {},
   }))
 }
 
@@ -279,7 +292,7 @@ async function rebuildScript(tx: DbOrTx, ctx: ChurchContext, script: typeof serv
       }
       if (b.type === 'reading' || b.type === 'psalm') {
         const prev = take((o) => (o.type === 'reading' || o.type === 'psalm') && slotOfOld(o) === b.data.slot)
-        if (prev) return { ...b, title: prev.title, personId: prev.personId, dutyId: prev.dutyId ?? b.dutyId, data: { ...prev.data, slot: b.data.slot } }
+        if (prev) return { ...b, title: prev.title, personId: prev.personId, dutyId: prev.dutyId ?? b.dutyId, data: { ...prev.data, slot: b.data.slot, responses: b.data.responses } }
         const fromDay = suggestion?.readings.find((r) => canonicalSlot(r.key) === b.data.slot)
         return fromDay ? { ...b, title: fromDay.label, textSource: 'estevao', data: { ...b.data, reference: fromDay.reference, source: 'estevao' as const, ...(fromDay.alternatives.length ? { alternatives: fromDay.alternatives } : {}) } } : b
       }
@@ -512,6 +525,7 @@ const scriptBlockSchema = z.object({
     slot: z.string().trim().max(40).optional(),
     songIds: z.array(z.string().uuid()).max(30).optional(),
     songKeys: songKeysSchema.optional(),
+    responses: responsesSchema.optional(),
     items: z.array(z.object({
       text: z.string().trim().min(1).max(1000),
       ownerPersonId: z.string().uuid().nullable().optional(),
@@ -638,6 +652,9 @@ export async function applySuggestions(db: Db, ctx: ChurchContext, serviceId: st
       const readingDuty = await tx.query.duties.findFirst({ where: and(eq(duties.churchId, ctx.church.id), eq(duties.kind, 'reading')) })
       const firstReadingIdx = next.findIndex((b) => b.type === 'reading' || b.type === 'psalm')
       const oldReadings = next.filter((b) => b.type === 'reading' || b.type === 'psalm')
+      // Responsórios: os da leitura que já estava na posição ou, sem ela, os do modelo.
+      const tplReadings = script.templateId ? (await loadTemplateBlocks(tx, ctx, script.templateId).catch(() => [])).filter((b) => b.type === 'reading' || b.type === 'psalm') : []
+      const tplResponses = (slot: string) => tplReadings.find((b) => slotFromTitle(b.title) === slot)?.data?.responses
       const newReadings = input.readings.map((r, i) => {
         // Mesma posição do lecionário (ou, sem posição marcada, a mesma ordem).
         const slot = canonicalSlot(r.key)
@@ -651,7 +668,10 @@ export async function applySuggestions(db: Db, ctx: ChurchContext, serviceId: st
           // Mantém a pessoa já atribuída à leitura na mesma posição, se houver.
           dutyId: previous?.dutyId ?? readingDuty?.id ?? null,
           personId: previous?.personId ?? null,
-          data: { reference: r.reference, source: 'estevao' as const, slot, ...(r.alternatives.length ? { alternatives: r.alternatives } : {}) },
+          data: {
+            reference: r.reference, source: 'estevao' as const, slot, ...(r.alternatives.length ? { alternatives: r.alternatives } : {}),
+            ...((previous?.data.responses ?? tplResponses(slot)) ? { responses: previous?.data.responses ?? tplResponses(slot) } : {}),
+          },
         }
       })
       if (input.replaceReadings) {
@@ -918,6 +938,8 @@ export async function publishScript(db: Db, ctx: ChurchContext, serviceId: strin
       dutyId: b.dutyId,
       personId: b.personId,
       reference: b.data.reference ?? null,
+      // Responsórios já resolvidos (evangelista, deuterocanônico) para o publicado não mudar depois.
+      responses: b.type === 'reading' || b.type === 'psalm' ? resolveResponses(b.data.slot, b.data.reference, b.data.responses) : {},
       responsibles: b.responsibles.map((r) => ({ name: r.name, status: r.status })),
       songs: b.songs.map((s) => ({ title: s!.title, author: s!.author, musicalKey: keyFor(b.data, s!), originalKey: s!.musicalKey, link: s!.link })),
       items: (b.data.items ?? []).map((i) => ({ text: i.text, owner: i.ownerPersonId ? ownerName.get(i.ownerPersonId) ?? null : null, status: i.status })),
@@ -963,6 +985,7 @@ interface ExportBlock {
   title: string
   body: string | null
   reference: string | null
+  responses?: ResolvedResponses
   responsibles: { name: string, status: string }[]
   songs: { title: string, author: string | null, musicalKey: string | null }[]
   items: { text: string, owner: string | null }[]
@@ -981,10 +1004,14 @@ export function exportText(content: Record<string, unknown>, timeZone: string, v
   for (const b of (content.blocks ?? []) as ExportBlock[]) {
     const who = b.responsibles.length ? ` — ${b.responsibles.map((r) => `${r.name}${r.status !== 'confirmed' ? ` (${STATUS_TEXT[r.status] ?? r.status})` : ''}`).join(', ')}` : ''
     lines.push(`${b.title.toUpperCase()}${who}`)
+    const r = b.responses ?? {}
+    const say = (x: ResolvedLine) => [x.leader, x.people && `*Todos: ${x.people}*`].filter(Boolean).forEach((l) => lines.push(l))
+    if (r.open) say(r.open)
     if (b.reference) lines.push(b.reference)
+    if (r.close) say(r.close)
     for (const s of b.songs) lines.push(`• ${s.title}${s.author ? ` — ${s.author}` : ''}${s.musicalKey ? ` (${s.musicalKey})` : ''}`)
     for (const i of b.items) lines.push(`• ${i.text}${i.owner ? ` (${i.owner})` : ''}`)
-    if (b.body) lines.push(b.body)
+    if (b.body) lines.push(whatsappRichText(b.body))
     lines.push('')
   }
   return lines.join('\n').trimEnd() + '\n'
@@ -994,16 +1021,25 @@ function escapeHtml(s: string) {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', '\'': '&#39;' }[c]!))
 }
 
+// Texto formatado para impressão: negrito e rubrica (itálico, vermelho, à direita).
+function richHtml(src: string) {
+  return parseRichText(src).map((l) => {
+    const inner = l.parts.map((p) => (p.bold ? `<strong>${escapeHtml(p.text)}</strong>` : escapeHtml(p.text))).join('')
+    return `<p${l.rubric ? ' class="rubric"' : ''}>${inner || '&nbsp;'}</p>`
+  }).join('')
+}
+
 export function exportHtml(content: Record<string, unknown>, timeZone: string, version: number): string {
   const service = content.service as { title: string, startsAt: string, location: string | null }
   const liturgy = (content.liturgy ?? {}) as { color?: string | null, celebration?: string | null, sundayName?: string | null }
   const blocks = (content.blocks ?? []) as ExportBlock[]
   const body = blocks.map((b) => {
     const who = b.responsibles.length ? `<p class="who">${b.responsibles.map((r) => escapeHtml(r.name + (r.status !== 'confirmed' ? ` (${STATUS_TEXT[r.status] ?? r.status})` : ''))).join(', ')}</p>` : ''
-    const ref = b.reference ? `<p class="ref">${escapeHtml(b.reference)}</p>` : ''
+    const say = (x?: ResolvedLine) => (x ? `<div class="resp">${x.leader ? `<p>${escapeHtml(x.leader)}</p>` : ''}${x.people ? `<p><strong>Todos: ${escapeHtml(x.people)}</strong></p>` : ''}</div>` : '')
+    const ref = `${say(b.responses?.open)}${b.reference ? `<p class="ref">${escapeHtml(b.reference)}</p>` : ''}${say(b.responses?.close)}`
     const songsHtml = b.songs.length ? `<ul>${b.songs.map((s) => `<li>${escapeHtml(s.title)}${s.author ? ` — ${escapeHtml(s.author)}` : ''}${s.musicalKey ? ` (${escapeHtml(s.musicalKey)})` : ''}</li>`).join('')}</ul>` : ''
     const items = b.items.length ? `<ul>${b.items.map((i) => `<li>${escapeHtml(i.text)}${i.owner ? ` <span class="who">(${escapeHtml(i.owner)})</span>` : ''}</li>`).join('')}</ul>` : ''
-    const text = b.body ? `<div class="text">${escapeHtml(b.body).replace(/\n/g, '<br>')}</div>` : ''
+    const text = b.body ? `<div class="text">${richHtml(b.body)}</div>` : ''
     return `<section><h2>${escapeHtml(b.title)}</h2>${who}${ref}${songsHtml}${items}${text}</section>`
   }).join('\n')
   const lit = [liturgy.sundayName, liturgy.celebration, liturgy.color && `cor litúrgica: ${liturgy.color}`].filter(Boolean).map((x) => escapeHtml(String(x))).join(' · ')
@@ -1014,6 +1050,7 @@ export function exportHtml(content: Record<string, unknown>, timeZone: string, v
 body{font:17px/1.55 Georgia,'Times New Roman',serif;color:#1d1b18;max-width:40rem;margin:2rem auto;padding:0 1rem}
 h1{font-size:1.6rem;margin:0}h2{font-size:1.05rem;text-transform:uppercase;letter-spacing:.04em;margin:1.6rem 0 .3rem;border-top:1px solid #d9d2c5;padding-top:.8rem}
 .meta{color:#5b5448;margin:.2rem 0}.who{color:#6b4e16;font-style:italic;margin:.2rem 0}.ref{font-weight:bold;margin:.2rem 0}
+.text p,.resp p{margin:0 0 .35rem}.rubric{font-style:italic;color:#b3261e;text-align:right}.resp{margin:.3rem 0}
 @media print{body{margin:0}section{break-inside:avoid}}
 </style></head><body>
 <h1>${escapeHtml(String(content.title ?? service.title))}</h1>

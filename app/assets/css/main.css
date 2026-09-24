@@ -491,6 +491,31 @@ details > summary::-webkit-details-marker { display: none; }
 .check__text { flex: 1; }
 .suggest:disabled { opacity: .45; cursor: not-allowed; }
 
+/* Texto formatado dos ritos: negrito (todos) e rubrica (instrução) */
+.richtext p { margin: 0 0 6px; white-space: pre-wrap; }
+.richtext p:last-child { margin-bottom: 0; }
+.rubric { font-style: italic; color: #b3261e; text-align: right; }
+.rubric-inline { font-style: italic; color: #b3261e; }
+.richtext--clamp { max-height: 4.8em; overflow: hidden; -webkit-mask-image: linear-gradient(#000 60%, transparent); mask-image: linear-gradient(#000 60%, transparent); }
+.richedit { border: 1px solid var(--line); border-radius: 14px; background: var(--surface, #fff); overflow: hidden; }
+.richedit:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+.richedit__bar { display: flex; gap: 6px; padding: 6px; border-bottom: 1px solid var(--line-2); background: var(--surface-2); flex-wrap: wrap; }
+.richedit__btn { min-height: 36px; padding: 6px 12px; border-radius: 10px; border: 1px solid transparent; background: transparent; color: var(--ink-2); font: inherit; font-size: 14px; cursor: pointer; }
+.richedit__btn[aria-pressed="true"] { background: #fff; border-color: var(--line); color: var(--ink); box-shadow: 0 1px 2px rgba(0, 0, 0, .06); }
+.richedit__btn--rubric em { color: #b3261e; }
+.richedit__area { min-height: 110px; padding: 12px 14px; outline: none; font-size: 15.5px; line-height: 1.5; }
+.richedit__area p { margin: 0 0 6px; }
+.richedit__area p.is-editor-empty:first-child::before { content: attr(data-placeholder); color: var(--faint); float: left; height: 0; pointer-events: none; }
+
+/* Respostas das leituras no modelo */
+.respcard { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 14px; background: var(--surface-2); }
+.resprow { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 12px; background: #fff; }
+.resprow__head { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.resprow__head input { width: 20px; height: 20px; accent-color: var(--accent); flex: none; }
+.resprow__body { display: flex; flex-direction: column; gap: 6px; padding-left: 30px; font-size: 14.5px; }
+.resprow__body p { margin: 0; }
+.resprow__body .linkbtn { align-self: flex-start; }
+
 /* Modelo: uma linha por bloco, cor do tipo na borda, alça para arrastar */
 .tplrow { border-left: 4px solid var(--line-2); }
 .tplrow__head { display: flex; align-items: stretch; }

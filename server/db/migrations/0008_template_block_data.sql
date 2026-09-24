@@ -1,0 +1,1 @@
+ALTER TABLE "template_blocks" ADD COLUMN "data" jsonb DEFAULT '{}'::jsonb NOT NULL;

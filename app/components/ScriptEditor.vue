@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { EditableBlock, LiturgicalSuggestion, ScriptView, Song } from '~/types'
+import { resolveResponses } from '#shared/liturgy'
 
 // Editor do roteiro (coordenação e pastores). Mudanças ficam locais até salvar; a
 // coordenação publica, os pastores salvam para a coordenação publicar.
@@ -67,6 +68,11 @@ const announcements = computed(() => blocks.value.find((b) => b.type === 'announ
 const readersMissing = computed(() => readings.value.filter((r) => !r.personId).length)
 const songCount = computed(() => musicBlock.value?.data.songIds?.length ?? 0)
 
+function respLine(b: EditableBlock) {
+  const r = resolveResponses(b.data.slot, b.data.reference, b.data.responses)
+  const fmt = (x?: { leader: string, people: string }) => (x ? [x.leader, x.people && `todos: ${x.people}`].filter(Boolean).join(' — ') : '')
+  return [r.open && `Antes: ${fmt(r.open)}`, r.close && `No fim: ${fmt(r.close)}`].filter(Boolean).join(' · ')
+}
 function isAdapted(b: EditableBlock) {
   return b.data.templateBody !== undefined && b.data.templateBody !== null && (b.body ?? '') !== (b.data.templateBody ?? '')
 }
@@ -482,14 +488,13 @@ async function saveDraft() {
           <!-- Rito -->
           <template v-if="it.kind === 'rite' && it.block">
             <template v-if="editingRite !== it.block.key">
-              <p
+              <RichText
                 v-if="it.block.body"
+                :text="it.block.body"
                 class="prose"
-                :class="{ clamp3: !expanded.has(it.block.key) }"
+                :class="{ 'richtext--clamp': !expanded.has(it.block.key) }"
                 style="margin-top:8px"
-              >
-                {{ it.block.body }}
-              </p>
+              />
               <p
                 v-else
                 class="soft small"
@@ -529,15 +534,10 @@ async function saveDraft() {
               </div>
             </template>
             <template v-else>
-              <label
-                class="sr-only"
-                :for="`rite-${it.block.key}`"
-              >Texto de {{ it.block.title }} neste culto</label>
-              <textarea
-                :id="`rite-${it.block.key}`"
+              <RichEditor
                 v-model="riteDraft"
-                class="textarea"
-                style="min-height:120px;margin-top:10px;font-size:15.5px"
+                style="margin-top:10px"
+                :label="`Texto de ${it.block.title} neste culto`"
                 placeholder="Cole ou escreva o texto deste rito só para este culto. Deixe vazio para voltar ao padrão do modelo."
               />
               <div
@@ -682,6 +682,14 @@ async function saveDraft() {
                     />
                   </button>
                 </div>
+                <!-- Responsórios vindos do modelo (deuterocanônico e evangelista já aplicados). -->
+                <p
+                  v-if="respLine(r)"
+                  class="xsmall muted"
+                  style="margin-top:6px"
+                >
+                  {{ respLine(r) }}
+                </p>
                 <div
                   class="row"
                   style="gap:6px;margin-top:10px"

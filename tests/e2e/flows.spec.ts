@@ -246,9 +246,22 @@ test('modelo de liturgia: título fixo, nome do domingo, rito e leituras marcada
   await expect(coord.getByText(/com o Próprio no Tempo Comum/)).toBeVisible()
   await addBlock('Rito')
   await coord.getByLabel('Nome no roteiro').fill('Confissão')
-  await coord.getByRole('textbox', { name: 'Texto', exact: true }).fill('Texto de exemplo')
+  // Negrito (o que todos dizem) e rubrica (instrução) pelo editor.
+  const texto = coord.getByRole('textbox', { name: 'Texto', exact: true })
+  await texto.click()
+  await coord.getByRole('button', { name: 'Negrito' }).click()
+  await texto.pressSequentially('Todos juntos.')
+  await coord.getByRole('button', { name: 'Negrito' }).click()
+  await texto.press('Enter')
+  await coord.getByRole('button', { name: 'Rubrica' }).click()
+  await texto.pressSequentially('De pé.')
+  await expect(coord.getByRole('button', { name: 'Rubrica' })).toHaveAttribute('aria-pressed', 'true')
   await addBlock('Leituras do dia')
   await coord.getByRole('checkbox', { name: 'Segunda leitura' }).uncheck()
+  // Responsórios: liga o anúncio do evangelho e desliga o Glória ao Pai.
+  await coord.getByRole('checkbox', { name: 'Anúncio antes da leitura' }).check()
+  await coord.getByRole('checkbox', { name: 'Glória ao Pai no final' }).uncheck()
+  await expect(coord.getByText('Todos: Louvado sejas, ó Cristo.')).toBeVisible()
   // Reordenar pelo teclado na alça (o mesmo que arrastar): nome do domingo vai para o topo.
   await coord.getByRole('button', { name: /^Mover Nome do domingo/ }).press('ArrowUp')
   await expect(coord.getByRole('button', { name: /^Mover Nome do domingo \(posição 1/ })).toBeFocused()
@@ -256,7 +269,10 @@ test('modelo de liturgia: título fixo, nome do domingo, rito e leituras marcada
   await expect(coord.getByText(/Modelo salvo/)).toBeVisible()
 
   const res = await coord.request.get(`/api/v1/churches/porto/templates/${id}`)
-  const { template } = await res.json() as { template: { blocks: { type: string, title: string, textSource: string }[] } }
+  const { template } = await res.json() as { template: { blocks: { type: string, title: string, textSource: string, body: string | null, data: { responses?: { open?: { on: boolean }, close?: { on: boolean } } } }[] } }
+  expect(template.blocks.find((b) => b.title === 'Confissão')!.body).toBe('**Todos juntos.**\n> De pé.')
+  expect(template.blocks.find((b) => b.title === 'Evangelho')!.data.responses!.open!.on).toBe(true)
+  expect(template.blocks.find((b) => b.title === 'Salmo')!.data.responses!.close!.on).toBe(false)
   expect(template.blocks.map((b) => [b.type, b.title, b.textSource])).toEqual([
     ['heading', 'Nome do domingo', 'estevao'],
     ['heading', 'Liturgia da Palavra', 'church'],

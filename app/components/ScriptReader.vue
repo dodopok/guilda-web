@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { PublishedBlock, PublishedContent } from '~/types'
+import { plainRichText } from '#shared/liturgy'
 
 // Leitura do roteiro publicado, pensada para o celular: quem faz o quê, textos
 // recolhidos (toque para ver inteiro), leituras, músicas e avisos.
@@ -21,8 +22,9 @@ function body(b: PublishedBlock) {
 }
 const blocks = computed(() => props.content.blocks.map((b) => {
   const text = body(b)
-  const long = (b.type === 'rite' || b.type === 'collect' || b.type === 'text') && text.length > 180
-  return { ...b, text, long, who: b.type === 'psalm' && !b.responsibles.length ? 'todos' : b.responsibles.map((r) => r.name).join(', ') }
+  const rich = b.type === 'rite' || b.type === 'collect' || b.type === 'text'
+  const long = rich && plainRichText(text).length > 180
+  return { ...b, text, rich, long, who: b.type === 'psalm' && !b.responsibles.length ? 'todos' : b.responsibles.map((r) => r.name).join(', ') }
 }))
 </script>
 
@@ -57,11 +59,40 @@ const blocks = computed(() => props.content.blocks.map((b) => {
           style="font-size:13.5px;font-weight:700;color:var(--accent-deep)"
         >{{ b.who }}</span>
       </div>
-      <template v-if="b.text">
-        <p
+      <!-- Leituras: anúncio, referência e resposta de todos (em negrito). -->
+      <div
+        v-if="b.type === 'reading' || b.type === 'psalm'"
+        class="richtext"
+        style="margin-top:8px"
+      >
+        <template v-if="b.responses?.open">
+          <p>{{ b.responses.open.leader }}</p>
+          <p v-if="b.responses.open.people">
+            <strong>Todos: {{ b.responses.open.people }}</strong>
+          </p>
+        </template>
+        <p class="strong">
+          {{ b.text }}
+        </p>
+        <template v-if="b.responses?.close">
+          <p>{{ b.responses.close.leader }}</p>
+          <p v-if="b.responses.close.people">
+            <strong>Todos: {{ b.responses.close.people }}</strong>
+          </p>
+        </template>
+      </div>
+      <template v-else-if="b.text">
+        <RichText
+          v-if="b.rich"
+          :text="b.text"
           class="prose"
-          :class="{ clamp3: b.long && !open.has(b.id) }"
+          :class="{ 'richtext--clamp': b.long && !open.has(b.id) }"
           style="margin-top:8px"
+        />
+        <p
+          v-else
+          class="prose"
+          style="margin-top:8px;white-space:pre-line"
         >
           {{ b.text }}
         </p>
