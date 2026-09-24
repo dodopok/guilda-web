@@ -5,7 +5,7 @@ const { capi, tz, info, link } = useChurch()
 const toast = useToast()
 
 type Mode = 'disabled' | 'simulation' | 'cloud_api' | 'ycloud'
-interface TemplateRow { kind: string, label: string, defaultName: string, body: string, category: 'UTILITY' | 'AUTHENTICATION', vars: { name: string, label: string, example: string }[], codeExpirationMinutes: number | null, name: string, language: string, status: string }
+interface TemplateRow { kind: string, label: string, defaultName: string, body: string, category: 'UTILITY' | 'MARKETING' | 'AUTHENTICATION', vars: { name: string, label: string, example: string }[], codeExpirationMinutes: number | null, name: string, language: string, status: string }
 interface Channel {
   mode: Mode
   lastWebhookAt: string | null
@@ -107,7 +107,7 @@ const checklist = computed(() => {
   const total = c.templates.length
   return [
     { label: 'Número verificado', sub: official.value ? (c.readiness.hasCredentials ? 'Número e chave cadastrados' : 'Cadastre o número e a chave acima') : 'Escolha um modo oficial', done: official.value && c.readiness.hasCredentials },
-    { label: 'Modelos aprovados', sub: `${approved.value} de ${total} aprovados pela Meta`, done: approved.value === total },
+    { label: 'Modelos aprovados', sub: `${approved.value} de ${total} aprovados no provedor`, done: approved.value === total },
     { label: 'Webhook respondendo', sub: !official.value ? 'Precisa de um modo oficial' : c.lastWebhookAt ? `Último sinal: ${stamp(c.lastWebhookAt, tz.value)}` : c.readiness.hasWebhookSecret ? 'Nenhum sinal recebido ainda' : 'Cadastre o segredo do webhook', done: official.value && c.readiness.hasWebhookSecret && Boolean(c.lastWebhookAt) },
     { label: 'Coexistência comprovada', sub: c.readiness.coexistenceVerified ? 'Registrado abaixo' : 'Registre abaixo como foi testado', done: c.readiness.coexistenceVerified },
     { label: 'Autorizações registradas', sub: `${c.consents.granted} de ${c.consents.people} pessoas autorizaram`, done: c.consents.people > 0 && c.consents.granted === c.consents.people, action: 'Ver pessoas', to: link('/coordenacao/pessoas') },
@@ -123,7 +123,7 @@ interface WaStep { n: number, title: string, sub: string, done: boolean }
 const waSteps = computed<WaStep[]>(() => [
   { n: 1, title: 'Conectar a conta', sub: officialSetupDone.value ? 'Chave e webhook prontos' : 'Conta, chave e webhook', done: officialSetupDone.value },
   { n: 2, title: 'Comprovar coexistência', sub: data.value?.coexistence.status === 'verified' ? 'O WhatsApp Business segue ativo' : 'O mesmo número continua no celular', done: data.value?.coexistence.status === 'verified' },
-  { n: 3, title: 'Aprovar os modelos', sub: `${approved.value} de ${data.value?.templates.length ?? 0} aprovados pela Meta`, done: templateStepDone.value },
+  { n: 3, title: 'Aprovar os modelos', sub: `${approved.value} de ${data.value?.templates.length ?? 0} aprovados no provedor`, done: templateStepDone.value },
   { n: 4, title: 'Testar e ligar', sub: consentsReady.value ? 'Autorizações registradas' : `${data.value?.consents.granted ?? 0} de ${data.value?.consents.people ?? 0} autorizaram`, done: Boolean(data.value?.readiness.canSendReal && templateStepDone.value && consentsReady.value && !data.value?.testMode) },
 ])
 const selectedStep = ref(0)
@@ -135,7 +135,7 @@ const enableBlocker = computed(() => {
   if (!data.value?.readiness.realSendAllowedByServer) return 'O servidor ainda não liberou o envio real.'
   if (!officialSetupDone.value) return 'Conclua a conta e o webhook primeiro.'
   if (data.value?.coexistence.status !== 'verified') return 'Comprove que o WhatsApp Business continua funcionando no aparelho.'
-  if (!templateStepDone.value) return 'Aguarde a aprovação dos quatro modelos pela Meta.'
+  if (!templateStepDone.value) return `Aprove todos os ${data.value?.templates.length ?? 0} modelos cadastrados no provedor selecionado.`
   if (!consentsReady.value) return 'Registre a autorização de todas as pessoas com celular.'
   return ''
 })
@@ -625,7 +625,7 @@ async function enableRealSending() {
                   <span
                     class="muted"
                     style="display:block;font-size:13px"
-                  >{{ t.category === 'AUTHENTICATION' ? 'Autenticação · código de 6 dígitos' : `Utilidade · ${t.vars.map((x) => x.name).join(', ')}` }}</span>
+                  >{{ t.category === 'AUTHENTICATION' ? 'Autenticação · código de 6 dígitos' : `${t.category === 'MARKETING' ? 'Marketing' : 'Utilidade'} · ${t.vars.map((x) => x.name).join(', ')}` }}</span>
                 </span>
                 <span
                   class="stag"
@@ -651,13 +651,13 @@ async function enableRealSending() {
                   v-if="tplStatus[t.kind] === 'rejected'"
                   style="font-size:13.5px;color:#8f2a1e;font-weight:700"
                 >
-                  A Meta rejeitou este modelo. Confira categoria e variáveis acima e envie de novo com o texto atual.
+                  O provedor rejeitou este modelo. Confira categoria e variáveis acima e envie de novo com o texto atual.
                 </p>
                 <dl class="tplmeta">
                   <dt>Nome</dt>
                   <dd><code class="mono">{{ t.name }}</code></dd>
                   <dt>Categoria</dt>
-                  <dd>{{ t.category === 'AUTHENTICATION' ? 'Autenticação (Authentication)' : 'Utilidade (Utility)' }}</dd>
+                  <dd>{{ t.category === 'AUTHENTICATION' ? 'Autenticação (Authentication)' : t.category === 'MARKETING' ? 'Marketing' : 'Utilidade (Utility)' }}</dd>
                   <dt>Idioma</dt>
                   <dd>Português (BR) · pt_BR</dd>
                 </dl>
