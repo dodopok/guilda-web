@@ -70,7 +70,7 @@ export async function getTemplate(db: Db, ctx: ChurchContext, id: string) {
   const t = await db.query.liturgyTemplates.findFirst({ where: and(eq(liturgyTemplates.churchId, ctx.church.id), eq(liturgyTemplates.id, id)) })
   if (!t) throw notFound('Modelo')
   const blocks = await db.select().from(templateBlocks).where(and(eq(templateBlocks.churchId, ctx.church.id), eq(templateBlocks.templateId, id))).orderBy(asc(templateBlocks.position))
-  return { ...t, blocks }
+  return { ...t, blocks, upcomingDrafts: (await upcomingDrafts(db, ctx, id)).length }
 }
 
 export async function createTemplate(db: Db, ctx: ChurchContext, input: z.infer<typeof templateSchema>) {
@@ -88,7 +88,7 @@ export async function createTemplate(db: Db, ctx: ChurchContext, input: z.infer<
   })
 }
 
-export async function updateTemplate(db: Db, ctx: ChurchContext, id: string, input: Partial<z.infer<typeof templateSchema>> & { archived?: boolean }) {
+export async function updateTemplate(db: Db, ctx: ChurchContext, id: string, input: Partial<z.infer<typeof templateSchema>> & { archived?: boolean, applyToUpcoming?: boolean }) {
   requireCoordinator(ctx)
   return db.transaction(async (tx) => {
     const t = await tx.query.liturgyTemplates.findFirst({ where: and(eq(liturgyTemplates.churchId, ctx.church.id), eq(liturgyTemplates.id, id)) })
@@ -110,7 +110,15 @@ export async function updateTemplate(db: Db, ctx: ChurchContext, id: string, inp
       }
     }
     await audit(tx, { churchId: ctx.church.id, actorAccountId: ctx.accountId, action: 'template.updated', entityType: 'template', entityId: id })
-    return { id }
+    // Leva a nova ordem aos próximos roteiros ainda não publicados, mantendo o preenchido.
+    let updatedScripts = 0
+    if (input.applyToUpcoming && input.blocks) {
+      for (const { script } of await upcomingDrafts(tx, ctx, id)) {
+        await rebuildScript(tx, ctx, script, id)
+        updatedScripts++
+      }
+    }
+    return { id, updatedScripts }
   })
 }
 
@@ -236,6 +244,14 @@ export async function rebuildFromTemplate(db: Db, ctx: ChurchContext, serviceId:
   await db.transaction(async (tx) => {
     const script = await loadScript(tx, ctx, serviceId)
     if (!script) throw notFound('Roteiro')
+    await rebuildScript(tx, ctx, script, templateId)
+  })
+  return getScript(db, ctx, serviceId)
+}
+
+async function rebuildScript(tx: DbOrTx, ctx: ChurchContext, script: typeof serviceScripts.$inferSelect, templateId: string) {
+  {
+    const serviceId = script.serviceId
     const tpl = await loadTemplateBlocks(tx, ctx, templateId)
     const old = await tx.select().from(scriptBlocks).where(and(eq(scriptBlocks.churchId, ctx.church.id), eq(scriptBlocks.scriptId, script.id))).orderBy(asc(scriptBlocks.position))
     const snap = script.liturgicalSnapshotId
@@ -291,8 +307,18 @@ export async function rebuildFromTemplate(db: Db, ctx: ChurchContext, serviceId:
     if (next.length) await tx.insert(scriptBlocks).values(next.map((b, i) => ({ ...b, churchId: ctx.church.id, scriptId: script.id, position: i })))
     await tx.update(serviceScripts).set({ templateId, templateAppliedAt: new Date(), updatedAt: new Date() }).where(eq(serviceScripts.id, script.id))
     await audit(tx, { churchId: ctx.church.id, actorAccountId: ctx.accountId, action: 'script.rebuilt_from_template', entityType: 'script', entityId: script.id, data: { templateId, dropped: old.filter((b) => !used.has(b.id)).map((b) => b.title) } })
-  })
-  return getScript(db, ctx, serviceId)
+  }
+}
+
+// Próximos roteiros deste modelo que ainda não foram publicados: seguem o modelo quando a
+// coordenação salva e escolhe atualizar. Publicados ficam como estão (o roteiro avisa).
+async function upcomingDrafts(db: DbOrTx, ctx: ChurchContext, templateId: string) {
+  return db.select({ script: serviceScripts }).from(serviceScripts)
+    .innerJoin(services, and(eq(services.churchId, serviceScripts.churchId), eq(services.id, serviceScripts.serviceId)))
+    .where(and(
+      eq(serviceScripts.churchId, ctx.church.id), eq(serviceScripts.templateId, templateId), gt(services.startsAt, new Date()), eq(services.status, 'scheduled'),
+      sql`not exists (select 1 from ${scriptVersions} v where v.script_id = ${serviceScripts.id})`,
+    ))
 }
 
 async function latestFixedAnnouncements(db: DbOrTx, churchId: string, exceptServiceId: string) {

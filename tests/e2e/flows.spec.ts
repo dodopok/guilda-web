@@ -226,13 +226,18 @@ test('modelo de liturgia: título fixo, nome do domingo, rito do LOC e leituras 
   await coord.getByLabel('Nome do modelo').fill('Modelo e2e')
   const addBlock = async (label: string) => {
     await coord.getByRole('button', { name: 'Acrescentar bloco' }).click()
-    await coord.getByRole('button', { name: new RegExp(`^${label}`) }).click()
+    await coord.getByRole('dialog').getByRole('button', { name: new RegExp(`^${label}`) }).click()
   }
   // Modelo vazio começa pelas funções da escala.
   await coord.getByRole('button', { name: 'Começar pelas funções da escala' }).click()
   await expect(coord.getByText('Funções da escala fora deste modelo.')).toHaveCount(0)
-  await expect(coord.getByRole('button', { name: /^Tirar / })).not.toHaveCount(0)
-  while (await coord.getByRole('button', { name: /^Tirar / }).count()) await coord.getByRole('button', { name: /^Tirar / }).first().click()
+  const rows = coord.locator('.tplrow')
+  await expect(rows).not.toHaveCount(0)
+  // Mover e tirar ficam dentro do bloco aberto.
+  while (await rows.count()) {
+    await rows.first().locator('.tplrow__main').click()
+    await coord.getByRole('button', { name: 'Tirar do modelo' }).click()
+  }
   await expect(coord.getByText('Funções da escala fora deste modelo.')).toHaveCount(0)
   await addBlock('Título')
   // Título é só texto: sem escolha de fonte.
@@ -264,14 +269,25 @@ test('modelo de liturgia: título fixo, nome do domingo, rito do LOC e leituras 
   const data = await editor(coord, nextMonth())
   const svc = data.services.filter((x) => x.kind === 'regular')[3]!
   await coord.goto(`/i/porto/roteiros/${svc.id}`)
-  await expect(coord.getByText(/Feito com o modelo/)).toBeVisible()
-  await coord.getByRole('button', { name: 'Refazer pelo modelo' }).click()
+  // Tudo certo: só uma linha discreta com o modelo no fim.
+  await expect(coord.getByText(/Ordem do culto: modelo “Domingo comum”/)).toBeVisible()
+  await coord.getByRole('button', { name: 'Trocar ou refazer' }).click()
   await coord.getByRole('radio', { name: /Modelo e2e/ }).check()
   await coord.getByRole('button', { name: 'Refazer o roteiro' }).click()
   await expect(coord.getByText(/Roteiro refeito pelo modelo/)).toBeVisible()
-  await expect(coord.getByText(/Feito com o modelo “Modelo e2e”/)).toBeVisible()
   await expect(coord.getByText('Liturgia da Palavra')).toBeVisible()
-  await expect(coord.getByText(/Na escala, mas fora do roteiro:/)).toBeVisible()
+  // O modelo novo deixa funções da liturgia de fora: o roteiro avisa no topo.
+  await expect(coord.getByText(/estão na escala, mas não aparecem no roteiro/)).toBeVisible()
+
+  // Mudar o modelo oferece levar a mudança aos próximos roteiros não publicados.
+  await coord.goto(`/i/porto/coordenacao/modelos/${id}`)
+  await addBlock('Avisos')
+  await coord.getByRole('button', { name: 'Salvar modelo' }).click()
+  await expect(coord.getByRole('heading', { name: 'Atualizar os próximos roteiros?' })).toBeVisible()
+  await coord.getByRole('button', { name: /Salvar e atualizar 1 roteiro/ }).click()
+  await expect(coord.getByText(/Modelo salvo e 1 roteiro atualizado/)).toBeVisible()
+  await coord.goto(`/i/porto/roteiros/${svc.id}`)
+  await expect(coord.getByRole('button', { name: /^Avisos/ })).toBeVisible()
   await coord.context().close()
 })
 

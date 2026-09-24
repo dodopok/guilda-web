@@ -210,6 +210,7 @@ const exportBase = computed(() => `/api/v1/churches/${slug.value}/scripts/${serv
           v-if="data.draft && canPublish"
           :view="data"
           :service-id="serviceId"
+          place="top"
           @refresh="refresh"
         />
         <ScriptEditor
@@ -221,6 +222,13 @@ const exportBase = computed(() => `/api/v1/churches/${slug.value}/scripts/${serv
           :scheduled="aux.scheduled"
           :can-publish="canPublish"
           :is-pastor="isPastor"
+          @refresh="refresh"
+        />
+        <ScriptTemplateBar
+          v-if="data.draft && aux && canPublish"
+          :view="data"
+          :service-id="serviceId"
+          place="bottom"
           @refresh="refresh"
         />
         <div
