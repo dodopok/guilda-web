@@ -1,5 +1,5 @@
 // Modelos de mensagem, como devem ser cadastrados no YCloud / gerenciador da Meta.
-// - Utilidade: variáveis NOMEADAS ({{nome}}), cada uma com exemplo, como o YCloud pede.
+// - Utilidade e marketing: variáveis NOMEADAS ({{nome}}), cada uma com exemplo, como o YCloud pede.
 //   O envio informa parameter_name de cada variável.
 // - Autenticação (senha): formato fixo da Meta, só com o código (sem link nem texto livre)
 //   e botão "Copiar código". A Meta recusa como utilidade qualquer mensagem de senha/acesso.
@@ -18,7 +18,7 @@ export type MessageKind
     | 'reading_notice'
     | 'coordination_alert'
 
-export type TemplateCategory = 'UTILITY' | 'AUTHENTICATION'
+export type TemplateCategory = 'UTILITY' | 'MARKETING' | 'AUTHENTICATION'
 export interface TemplateVar { name: string, label: string, example: string }
 
 export interface TemplateDefinition {
@@ -36,6 +36,7 @@ export interface TemplateDefinition {
 
 const v = (name: string, label: string, example: string): TemplateVar => ({ name, label, example })
 const NOME = v('nome', 'primeiro nome', 'Maria')
+const PRIMEIRO_NOME = v('primeiro_nome', 'primeiro nome', 'Maria')
 const IGREJA = v('igreja', 'igreja', 'Anglicana Porto')
 const LINK = v('link', 'link no app', 'https://guilda.anglicanaporto.com.br/i/anglicana-porto')
 
@@ -65,64 +66,64 @@ export const TEMPLATES: Record<MessageKind, TemplateDefinition> = {
     defaultName: 'guilda_disponibilidade',
     label: 'Pedido de indisponibilidades',
     category: 'UTILITY',
-    body: 'Olá, {{nome}}! Os cultos de {{mes}} em {{igreja}} estão cadastrados. Marque até {{prazo}} aqueles em que você não pode servir: {{link}}',
-    vars: [NOME, v('mes', 'mês', 'outubro'), IGREJA, v('prazo', 'prazo', 'sábado, 26/09, às 22h'), LINK],
+    body: 'Olá, {{primeiro_nome}}! Os cultos de {{mes}} em {{igreja}} estão cadastrados. Marque até {{prazo}} aqueles em que você não pode servir: {{link}}. Agradecemos sua resposta.',
+    vars: [PRIMEIRO_NOME, v('mes', 'mês', 'outubro'), IGREJA, v('prazo', 'prazo', 'sábado, 26/09, às 22h'), LINK],
   },
   weekly_reminder: {
     kind: 'weekly_reminder',
     defaultName: 'guilda_lembrete',
     label: 'Lembrete semanal',
     category: 'UTILITY',
-    body: 'Olá, {{nome}}! Lembrete da sua escala em {{igreja}} nos próximos dias: {{tarefas}}. Detalhes no app: {{link}}. Se precisar de alteração, responda pelo app.',
-    vars: [NOME, IGREJA, v('tarefas', 'tarefas', 'domingo 27/09, 9h30: Leitura (chegar 9h10)'), LINK],
+    body: 'Olá, {{primeiro_nome}}! Lembrete da sua escala em {{igreja}} nos próximos dias: {{tarefas}}. Detalhes no app: {{link}}. Se precisar de alteração, responda pelo app.',
+    vars: [PRIMEIRO_NOME, IGREJA, v('tarefas', 'tarefas', 'domingo 27/09, 9h30: Leitura (chegar 9h10)'), LINK],
   },
   reminder_correction: {
     kind: 'reminder_correction',
     defaultName: 'guilda_correcao',
     label: 'Correção de lembrete',
     category: 'UTILITY',
-    body: 'Olá, {{nome}}! Sua escala em {{igreja}} mudou depois do último lembrete. Como fica agora: {{tarefas}}. Detalhes no app: {{link}}',
-    vars: [NOME, IGREJA, v('tarefas', 'tarefas atualizadas', 'domingo 27/09, 9h30: Café da manhã'), LINK],
+    body: 'Olá, {{primeiro_nome}}! Sua escala em {{igreja}} mudou depois do último lembrete. Como fica agora: {{tarefas_atualizadas}}. Detalhes no app: {{link}}. Consulte o app para conferir.',
+    vars: [PRIMEIRO_NOME, IGREJA, v('tarefas_atualizadas', 'tarefas atualizadas', 'domingo 27/09, 9h30: Café da manhã'), LINK],
   },
   schedule_published: {
     kind: 'schedule_published',
     defaultName: 'guilda_escala_publicada',
     label: 'Aviso de escala publicada',
     category: 'UTILITY',
-    body: 'Olá, {{nome}}! A escala de {{mes}} em {{igreja}} foi publicada. Suas tarefas: {{tarefas}}. Confirme ou recuse pelo app: {{link}}',
-    vars: [NOME, v('mes', 'mês', 'outubro'), IGREJA, v('tarefas', 'tarefas', 'dom 04/10: Leitura; dom 18/10: Café'), LINK],
+    body: 'Olá, {{primeiro_nome}}! A escala de {{mes}} em {{igreja}} foi publicada. Suas tarefas: {{tarefas}}. Confirme ou recuse pelo app: {{link}} para ver tudo.',
+    vars: [PRIMEIRO_NOME, v('mes', 'mês', 'outubro'), IGREJA, v('tarefas', 'tarefas', 'dom 04/10: Leitura; dom 18/10: Café'), LINK],
   },
   schedule_change: {
     kind: 'schedule_change',
     defaultName: 'guilda_escala_alterada',
     label: 'Aviso de alteração na escala',
-    category: 'UTILITY',
-    body: 'Olá, {{nome}}! A escala de {{mes}} em {{igreja}} foi alterada. Suas tarefas agora: {{tarefas}}. Veja no app: {{link}}',
-    vars: [NOME, v('mes', 'mês', 'outubro'), IGREJA, v('tarefas', 'tarefas', 'dom 11/10: Leitura'), LINK],
+    category: 'MARKETING',
+    body: 'Olá, {{primeiro_nome}}! A escala de {{mes}} em {{igreja}} foi alterada. Suas tarefas agora: {{tarefas}}. Veja no app: {{link}} para ver detalhes.',
+    vars: [PRIMEIRO_NOME, v('mes', 'mês', 'outubro'), IGREJA, v('tarefas', 'tarefas', 'dom 11/10: Leitura'), LINK],
   },
   swap_invite: {
     kind: 'swap_invite',
     defaultName: 'guilda_troca',
     label: 'Pedido de substituição',
     category: 'UTILITY',
-    body: 'Olá, {{nome}}! {{quem_pediu}} pediu que você assuma a tarefa {{funcao}} em {{culto}}. Aceite ou recuse pelo app: {{link}}',
-    vars: [NOME, v('quem_pediu', 'quem pediu', 'João'), v('funcao', 'função', 'Leitura'), v('culto', 'culto', 'domingo, 04/10, 9h30'), LINK],
+    body: 'Olá, {{primeiro_nome}}! {{quem_pediu}} pediu que você assuma a tarefa {{funcao}} em {{culto}}. Aceite ou recuse pelo app: {{link}}. Acesse o app para responder.',
+    vars: [PRIMEIRO_NOME, v('quem_pediu', 'quem pediu', 'João'), v('funcao', 'função', 'Leitura'), v('culto', 'culto', 'domingo, 04/10, 9h30'), LINK],
   },
   music_notice: {
     kind: 'music_notice',
     defaultName: 'guilda_musicas',
     label: 'Músicas do culto',
     category: 'UTILITY',
-    body: 'Olá, {{nome}}! As músicas do culto de {{culto}} em {{igreja}} foram definidas: {{musicas}}. Veja no app: {{link}}',
-    vars: [NOME, v('culto', 'culto', 'domingo, 04/10'), IGREJA, v('musicas', 'músicas', 'Grande é o Senhor (tom G), Santo, Santo, Santo (tom D)'), LINK],
+    body: 'Olá, {{primeiro_nome}}! As músicas do culto de {{culto}} em {{igreja}} foram definidas: {{musicas}}. Veja no app: {{link}} para consultar o roteiro.',
+    vars: [PRIMEIRO_NOME, v('culto', 'culto', 'domingo, 04/10'), IGREJA, v('musicas', 'músicas', 'Grande é o Senhor (tom G), Santo, Santo, Santo (tom D)'), LINK],
   },
   reading_notice: {
     kind: 'reading_notice',
     defaultName: 'guilda_leitura',
     label: 'Aviso de leitura',
-    category: 'UTILITY',
-    body: 'Olá, {{nome}}! Você lê {{leitura}} no culto de {{culto}} em {{igreja}}: {{referencia}}. Veja o roteiro no app: {{link}}',
-    vars: [NOME, v('leitura', 'leitura', 'a Primeira leitura'), v('culto', 'culto', 'domingo, 04/10'), IGREJA, v('referencia', 'referência', 'Isaías 5.1-7'), LINK],
+    category: 'MARKETING',
+    body: 'Olá, {{primeiro_nome}}! Você lê {{leitura}} no culto de {{culto}} em {{igreja}}: {{referencia}}. Veja o roteiro no app: {{link}} para consultar os detalhes.',
+    vars: [PRIMEIRO_NOME, v('leitura', 'leitura', 'a Primeira leitura'), v('culto', 'culto', 'domingo, 04/10'), IGREJA, v('referencia', 'referência', 'Isaías 5.1-7'), LINK],
   },
   coordination_alert: {
     kind: 'coordination_alert',

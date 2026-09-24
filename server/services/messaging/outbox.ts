@@ -15,7 +15,7 @@ export const BLOCK_REASONS: Record<string, string> = {
   real_send_disabled: 'Envio real desligado no servidor (WHATSAPP_ALLOW_REAL_SEND)',
   missing_credentials: 'Canal oficial sem credenciais completas',
   coexistence_not_verified: 'Coexistência com o aplicativo WhatsApp Business ainda não comprovada',
-  template_not_approved: 'Modelo de mensagem ainda não aprovado na Meta',
+  template_not_approved: 'Modelo de mensagem ainda não aprovado no provedor',
   not_test_recipient: 'Canal em modo de teste e número fora da lista de teste',
 }
 
