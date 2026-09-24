@@ -38,19 +38,29 @@ const cur = computed(() => services.value.find((s) => s.id === curId.value) ?? n
 const curDone = computed(() => Boolean(cur.value && cur.value.slots.length && cur.value.slots.every(isDone)))
 const unavailableNames = computed(() => (cur.value?.unavailablePersonIds ?? []).map((id) => props.editor.people.find((p) => p.id === id)?.displayName).filter(Boolean) as string[])
 
-// Sugestões: habilitado, livre, fora deste culto; menos tarefas no mês primeiro; avisa quem
-// ficaria sem domingo livre (a folga é meta, não regra; pastores não entram no alerta).
+// Sugestões: prioriza pessoas habilitadas que ainda não estão escaladas neste culto;
+// se necessário, também permite completar uma segunda função com alguém já escalado.
+// A folga de domingo é uma meta, não regra; pastores não entram no alerta.
 const loadOf = (id: string) => props.editor.loads.find((l) => l.personId === id)
-interface Cand { id: string, name: string, why: string, warn: string, score: number }
+interface Cand { id: string, name: string, why: string, warn: string, serviceRoles: string[], score: number }
 function candidatesFor(s: EditorService, sl: EditorSlot) {
-  const inService = new Set(s.slots.flatMap((x) => active(x).map((a) => a.personId)))
+  const inSlot = new Set(sl.assignments.map((a) => a.personId))
+  const serviceRoles = new Map<string, string[]>()
+  for (const otherSlot of s.slots) {
+    if (otherSlot.id === sl.id) continue
+    for (const assignment of active(otherSlot)) {
+      const roles = serviceRoles.get(assignment.personId) ?? []
+      roles.push(dutyName(otherSlot.dutyId))
+      serviceRoles.set(assignment.personId, roles)
+    }
+  }
   const sameDay = new Set(services.value.filter((o) => o.id !== s.id && o.localDate === s.localDate).flatMap((o) => o.slots.flatMap((x) => active(x).map((a) => a.personId))))
   const unav = new Set(s.unavailablePersonIds)
   const ok: Cand[] = []
   const unavailable: Cand[] = []
   const others: Cand[] = []
   for (const p of props.editor.people) {
-    if (inService.has(p.id)) continue
+    if (inSlot.has(p.id)) continue
     const load = loadOf(p.id)
     const tasks = load?.tasks ?? 0
     const exempt = load?.restExempt ?? p.roles.includes('pastor')
@@ -61,13 +71,14 @@ function candidatesFor(s: EditorService, sl: EditorSlot) {
       name: p.displayName,
       why: tasks === 0 ? `Ainda sem tarefa em ${monthName(props.month)}` : `${plural(tasks, 'tarefa', 'tarefas')} em ${monthName(props.month)}`,
       warn,
+      serviceRoles: serviceRoles.get(p.id) ?? [],
       score: tasks * 10 + (noRest ? 25 : 0) + (sameDay.has(p.id) ? 15 : 0),
     }
     if (!p.dutyIds.includes(sl.dutyId)) others.push(c)
     else if (unav.has(p.id)) unavailable.push(c)
     else ok.push(c)
   }
-  ok.sort((a, b) => a.score - b.score || a.name.localeCompare(b.name, 'pt-BR'))
+  ok.sort((a, b) => Number(a.serviceRoles.length > 0) - Number(b.serviceRoles.length > 0) || a.score - b.score || a.name.localeCompare(b.name, 'pt-BR'))
   others.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))
   return { ok, unavailable, others }
 }
@@ -91,11 +102,15 @@ const bulkSuggestions = computed(() => {
   const result: { slotId: string, personId: string, personName: string }[] = []
   for (const slot of service.slots) {
     const missing = Math.max(0, slot.requiredCount - active(slot).length)
+    const usedInSlot = new Set(slot.assignments.map((assignment) => assignment.personId))
+    const options = candidatesFor(service, slot).ok
     for (let i = 0; i < missing; i++) {
-      const candidate = candidatesFor(service, slot).ok.find((person) => !used.has(person.id))
+      const candidate = options.find((person) => !used.has(person.id))
+        ?? options.find((person) => used.has(person.id) && !usedInSlot.has(person.id))
       if (!candidate) break
       result.push({ slotId: slot.id, personId: candidate.id, personName: candidate.name })
       used.add(candidate.id)
+      usedInSlot.add(candidate.id)
     }
   }
   return result
@@ -110,13 +125,15 @@ const monthSuggestions = computed(() => {
     for (const slot of service.slots) {
       const missing = Math.max(0, slot.requiredCount - active(slot).length)
       const options = candidatesFor(service, slot).ok
+      const usedInSlot = new Set(slot.assignments.map((assignment) => assignment.personId))
       for (let i = 0; i < missing; i++) {
-        const candidate = options
-          .filter((person) => !used.has(person.id))
-          .sort((a, b) => (a.score + (planned.get(a.id) ?? 0) * 10 + (dayUsed.has(a.id) ? 15 : 0)) - (b.score + (planned.get(b.id) ?? 0) * 10 + (dayUsed.has(b.id) ? 15 : 0)) || a.name.localeCompare(b.name, 'pt-BR'))[0]
+        const ranked = options.slice().sort((a, b) => (a.score + (planned.get(a.id) ?? 0) * 10 + (dayUsed.has(a.id) ? 15 : 0)) - (b.score + (planned.get(b.id) ?? 0) * 10 + (dayUsed.has(b.id) ? 15 : 0)) || a.name.localeCompare(b.name, 'pt-BR'))
+        const candidate = ranked.find((person) => !used.has(person.id))
+          ?? ranked.find((person) => used.has(person.id) && !usedInSlot.has(person.id))
         if (!candidate) break
         result.push({ slotId: slot.id, personId: candidate.id, personName: candidate.name })
         used.add(candidate.id)
+        usedInSlot.add(candidate.id)
         dayUsed.add(candidate.id)
         planned.set(candidate.id, (planned.get(candidate.id) ?? 0) + 1)
       }
@@ -566,7 +583,10 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
               v-if="!isDone(sl) && sl.id !== curDuty && suggestionFor(cur, sl)"
               class="prep-quick-assign"
             >
-              <span class="grow"><strong>{{ suggestionFor(cur, sl)!.name }}</strong> · {{ suggestionFor(cur, sl)!.why }}</span>
+              <span class="grow"><strong>{{ suggestionFor(cur, sl)!.name }}</strong> · {{ suggestionFor(cur, sl)!.why }}<span
+                v-if="suggestionFor(cur, sl)!.serviceRoles.length"
+                class="muted"
+              > · Já serve em {{ suggestionFor(cur, sl)!.serviceRoles.join(', ') }}</span></span>
               <button
                 type="button"
                 class="btn btn--sm"
@@ -602,7 +622,7 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
                 class="note"
                 style="margin-bottom:10px;font-size:14.5px;padding:10px 12px"
               >
-                Ninguém habilitado está livre neste dia. Em “Ver todas as pessoas” dá para escalar alguém como exceção.
+                Ninguém habilitado está disponível para esta função. Em “Ver todas as pessoas” dá para escalar alguém como exceção.
               </p>
               <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px">
                 <button
@@ -623,6 +643,9 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
                     class="soft"
                     style="display:block;font-size:13px;margin-top:2px"
                   >{{ c.why }}</span><span
+                    v-if="c.serviceRoles.length"
+                    style="display:block;font-size:12.5px;color:var(--accent-deep);font-weight:700;margin-top:2px"
+                  >Já serve em {{ c.serviceRoles.join(', ') }}</span><span
                     v-if="c.warn"
                     style="display:block;font-size:12.5px;color:var(--wait);font-weight:700;margin-top:2px"
                   >{{ c.warn }}</span></span>
@@ -718,7 +741,7 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
     <Sheet
       v-model:open="allOpen"
       :title="allSlot && cur ? `${dutyName(allSlot.dutyId)} · ${weekdayShort(cur.startsAt, tz)} ${dayNumber(cur.startsAt, tz)}` : ''"
-      :lede="`Todo mundo, em ordem de quem tem menos tarefas no mês.`"
+      lede="Primeiro quem ainda não está escalado neste culto; depois quem já serve em outra função. Em cada grupo, priorizamos menos tarefas no mês."
     >
       <template v-if="allCands">
         <p
@@ -744,6 +767,9 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
             class="soft"
             style="display:block;font-size:13.5px"
           >{{ c.why }}</span><span
+            v-if="c.serviceRoles.length"
+            style="display:block;font-size:13px;color:var(--accent-deep);font-weight:700"
+          >Já serve em {{ c.serviceRoles.join(', ') }}</span><span
             v-if="c.warn"
             style="display:block;font-size:13px;color:var(--wait);font-weight:700"
           >{{ c.warn }}</span></span>
