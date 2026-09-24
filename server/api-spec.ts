@@ -39,7 +39,7 @@ export const ROUTES: RouteDoc[] = [
   { method: 'post', path: '/api/v1/password-reset/request', summary: 'Pedir código de 6 dígitos pelo WhatsApp, modelo de autenticação (resposta sempre igual)', auth: 'none', body: z.object({ login: z.string() }) },
   { method: 'post', path: '/api/v1/password-reset/verify', summary: 'Trocar o código por um token de uso único (30 min); 5 erros revogam o código', auth: 'none', body: z.object({ login: z.string(), code: z.string() }) },
   { method: 'post', path: '/api/v1/password-reset/confirm', summary: 'Definir nova senha com o token e já entrar', auth: 'none', body: z.object({ token: z.string(), password: z.string() }) },
-  { method: 'get', path: '/api/v1/invites/{token}', summary: 'Dados mínimos do convite (igreja e primeiro nome)', auth: 'none' },
+  { method: 'get', path: '/api/v1/invites/{token}', summary: 'Dados do convite para senha e lembretes, com telefone mascarado', auth: 'none' },
   { method: 'get', path: '/api/v1/invites/{token}/logo', summary: 'Logo da igreja do convite', auth: 'none' },
   { method: 'post', path: '/api/v1/invites/{token}/accept', summary: 'Aceitar convite: cria a conta (ou vincula com a senha existente) e inicia sessão', auth: 'none', body: z.object({ password: z.string(), client: z.enum(['web', 'native']).optional() }) },
   // Igrejas
@@ -98,7 +98,7 @@ export const ROUTES: RouteDoc[] = [
   { method: 'post', path: `${C}/schedule/{month}/publish`, summary: 'Publicar (nova versão), escolhendo se avisa agora', auth: 'coordinator', body: publishSchema },
   { method: 'delete', path: `${C}/assignments/{id}`, summary: 'Retirar pessoa da escala', auth: 'coordinator', body: z.object({ reason: z.string().optional(), notifyNow: z.boolean().optional() }) },
   { method: 'post', path: `${C}/assignments/{id}/reassign`, summary: 'Designação excepcional: trocar a pessoa com motivo registrado', auth: 'coordinator', body: reassignSchema },
-  { method: 'post', path: `${C}/assignments/{id}/respond`, summary: 'Confirmar ou recusar tarefa (rowVersion evita resposta sobre tarefa alterada)', auth: 'session', body: respondSchema },
+  { method: 'post', path: `${C}/assignments/{id}/respond`, summary: 'Confirmar ou recusar tarefa e, na recusa, pedir troca a outra pessoa', auth: 'session', body: respondSchema },
   { method: 'get', path: `${C}/assignments/{id}/candidates`, summary: 'Substitutos habilitados para a mesma função e sua situação', auth: 'session' },
   { method: 'get', path: `${C}/assignments/{id}/history`, summary: 'Histórico de respostas da tarefa', auth: 'session' },
   { method: 'post', path: `${C}/assignments/{id}/swaps`, summary: 'Pedir a um habilitado que assuma a tarefa', auth: 'session', body: proposeSwapSchema },

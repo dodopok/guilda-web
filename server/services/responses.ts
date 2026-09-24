@@ -50,6 +50,7 @@ async function notifyCoordinators(db: DbOrTx, church: ChurchRow, key: string, te
 export const respondSchema = z.object({
   decision: z.enum(['confirmed', 'declined']),
   note: z.string().trim().max(500).nullable().optional(),
+  candidatePersonId: z.string().uuid().optional(),
   // Versão da tarefa que a pessoa estava vendo: se mudou, a resposta é recusada.
   rowVersion: z.number().int().positive().optional(),
 })
@@ -63,10 +64,37 @@ export async function respondToAssignment(db: Db, ctx: ChurchContext, assignment
     if (input.rowVersion !== undefined && input.rowVersion !== a.rowVersion) {
       throw conflict('stale_assignment', 'Esta tarefa mudou depois que você abriu a página. Confira os dados atualizados e responda de novo.')
     }
-    const { service, duty, published } = await assignmentContext(tx, ctx.church.id, a.slotId)
+    const { slot, service, duty, published } = await assignmentContext(tx, ctx.church.id, a.slotId)
     if (!published) throw notFound('Tarefa')
     if (service.startsAt < new Date()) throw badRequest('service_past', 'Este culto já aconteceu.')
     if (service.status !== 'scheduled') throw badRequest('service_cancelled', 'Este culto foi cancelado.')
+    if (input.candidatePersonId && input.decision !== 'declined') {
+      throw badRequest('invalid_candidate', 'Só é possível indicar alguém ao avisar que não pode servir.')
+    }
+    if (input.candidatePersonId) {
+      const candidate = await tx.query.people.findFirst({ where: and(eq(people.churchId, ctx.church.id), eq(people.id, input.candidatePersonId)) })
+      if (!candidate || candidate.status !== 'active' || candidate.id === a.personId) {
+        throw badRequest('invalid_candidate', 'Escolha outra pessoa ativa desta igreja.')
+      }
+      const problems = await candidateProblems(tx, ctx.church.id, candidate.id, slot, service)
+      if (problems.length) throw conflict(`candidate_${problems[0]}`, `${candidate.displayName} ${PROBLEM_TEXT[problems[0]!]}.`, { problems })
+      const [swap] = await tx.insert(swapRequests).values({
+        churchId: ctx.church.id,
+        assignmentId: a.id,
+        fromPersonId: a.personId,
+        candidatePersonId: candidate.id,
+      }).onConflictDoNothing().returning()
+      if (!swap) throw conflict('swap_exists', `Você já pediu a ${candidate.displayName} para assumir esta tarefa.`)
+      const from = await tx.query.people.findFirst({ where: and(eq(people.churchId, ctx.church.id), eq(people.id, a.personId)) })
+      await enqueueMessage(tx, {
+        churchId: ctx.church.id,
+        personId: candidate.id,
+        kind: 'swap_invite',
+        idempotencyKey: `swap:${swap.id}`,
+        params: [firstName(candidate.displayName), from?.displayName ?? '', duty.name, formatServiceDate(service.startsAt, ctx.church.timezone), `${getConfig().appBaseUrl}/i/${ctx.church.slug}/trocas`],
+      })
+      await audit(tx, { churchId: ctx.church.id, actorAccountId: ctx.accountId, action: 'swap.proposed', entityType: 'swap', entityId: swap.id, data: { assignmentId: a.id, candidateId: candidate.id } })
+    }
     const [updated] = await tx.update(assignments).set({ status: input.decision, statusChangedAt: new Date(), updatedAt: new Date() })
       .where(eq(assignments.id, a.id)).returning()
     const [resp] = await tx.insert(assignmentResponses).values({

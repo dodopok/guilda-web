@@ -18,7 +18,8 @@ definePageMeta({
     const base = `/i/${slug}`
     const isCoord = state.value.me.roles.includes('coordinator')
     if (to.path.startsWith(`${base}/coordenacao`) && !isCoord) return navigateTo(base, { replace: true })
-    if (isCoord && !state.value.church.setupCompleted && to.path !== `${base}/coordenacao/comecar`) {
+    const canImportDuringSetup = to.path === `${base}/coordenacao/importar`
+    if (isCoord && !state.value.church.setupCompleted && to.path !== `${base}/coordenacao/comecar` && !canImportDuringSetup) {
       return navigateTo(`${base}/coordenacao/comecar`, { replace: true })
     }
   }],
@@ -52,9 +53,6 @@ const me = computed(() => memberships.value.find((m) => m.slug === slug.value))
 const myName = computed(() => me.value?.displayName ?? '')
 const roleLabel = computed(() => roleTags([...(isCoordinator.value ? ['coordinator'] : []), ...(isPastor.value ? ['pastor'] : [])]).join(' · ') || 'Voluntário(a)')
 
-// Telas da coordenação: só para quem coordena. A configuração inicial ocupa a tela toda.
-const bare = computed(() => route.path === link('/coordenacao/comecar'))
-
 const EXTRA = ['/coordenacao/configuracoes', '/coordenacao/mensagens', '/coordenacao/whatsapp', '/coordenacao/modelos', '/coordenacao/repertorio', '/coordenacao/importar', '/coordenacao/historico']
 function starts(p: string) {
   return route.path === link(p) || route.path.startsWith(`${link(p)}/`)
@@ -65,23 +63,42 @@ const current = computed(() => {
   if (starts('/perfil')) return 'voce'
   if (starts('/coordenacao/preparar')) return 'preparar'
   if (starts('/coordenacao/pessoas')) return 'pessoas'
+  if (starts('/coordenacao/mensagens')) return 'mensagens'
   if (EXTRA.some(starts)) return 'configuracoes'
-  if (starts('/coordenacao')) return 'mesa'
+  if (starts('/coordenacao')) return 'coord-home'
   return 'inicio'
 })
 const attention = computed(() => info.value?.attention ?? 0)
-const nav1 = computed(() => [
-  { key: 'inicio', to: link(''), label: 'Início', icon: 'home' },
-  { key: 'escala', to: link('/escala'), label: 'Escala da igreja', icon: 'calendar' },
-  { key: 'roteiro', to: link('/roteiros'), label: 'Roteiro do culto', icon: 'book' },
-])
-const nav2 = computed(() => [
-  { key: 'mesa', to: link('/coordenacao'), label: 'Mesa', icon: 'sparkle', badge: attention.value },
-  { key: 'preparar', to: link(`/coordenacao/preparar/${prepMonth.value}`), label: `Preparar ${monthName(prepMonth.value)}`, icon: 'calendar', badge: 0 },
-  { key: 'pessoas', to: link('/coordenacao/pessoas'), label: 'Pessoas e funções', icon: 'people', badge: 0 },
-  { key: 'configuracoes', to: link('/coordenacao/configuracoes'), label: 'Configurações', icon: 'settings', badge: 0 },
-])
-const COORD = ['mesa', 'preparar', 'pessoas', 'configuracoes']
+const messageProblems = ref(0)
+let messageCountRequest = 0
+watch(() => `${slug.value}:${isCoordinator.value}`, async () => {
+  const request = ++messageCountRequest
+  messageProblems.value = 0
+  if (!isCoordinator.value) return
+  try {
+    const result = await capi<{ counts: Record<string, number> }>('/messages?limit=1')
+    if (request === messageCountRequest) messageProblems.value = (result.counts.failed ?? 0) + (result.counts.unknown ?? 0)
+  } catch {
+    if (request === messageCountRequest) messageProblems.value = 0
+  }
+}, { immediate: true })
+
+const sidebarItems = computed(() => (isCoordinator.value
+  ? [
+      { key: 'coord-home', to: link('/coordenacao'), label: 'Início', icon: 'home', badge: attention.value },
+      { key: 'escala', to: link('/escala'), label: 'Escala da igreja', icon: 'calendar', badge: 0 },
+      { key: 'roteiro', to: link('/roteiros'), label: 'Roteiro do culto', icon: 'book', badge: 0 },
+      { key: 'preparar', to: link(`/coordenacao/preparar/${prepMonth.value}`), label: `Montar ${monthName(prepMonth.value)}`, icon: 'calendar', badge: 0 },
+      { key: 'pessoas', to: link('/coordenacao/pessoas'), label: 'Pessoas e funções', icon: 'people', badge: 0 },
+      { key: 'mensagens', to: link('/coordenacao/mensagens'), label: 'Mensagens', icon: 'message', badge: messageProblems.value },
+      { key: 'configuracoes', to: link('/coordenacao/configuracoes'), label: 'Configurações', icon: 'settings', badge: 0 },
+    ]
+  : [
+      { key: 'inicio', to: link(''), label: 'Início', icon: 'home', badge: 0 },
+      { key: 'escala', to: link('/escala'), label: 'Escala da igreja', icon: 'calendar', badge: 0 },
+      { key: 'roteiro', to: link('/roteiros'), label: 'Roteiro do culto', icon: 'book', badge: 0 },
+    ]))
+const COORD = ['coord-home', 'preparar', 'pessoas', 'mensagens', 'configuracoes']
 const tabs = computed(() => (isCoordinator.value
   ? [
       { key: 'inicio', to: link(''), label: 'Início', icon: 'home', badge: 0, on: current.value === 'inicio' },
@@ -117,7 +134,6 @@ const tabs = computed(() => (isCoordinator.value
       </NuxtLink>
     </div>
   </div>
-  <NuxtPage v-else-if="info && bare" />
   <div
     v-else-if="info"
     class="shell"
@@ -127,7 +143,7 @@ const tabs = computed(() => (isCoordinator.value
       aria-label="Navegação"
     >
       <NuxtLink
-        :to="link('')"
+        :to="isCoordinator ? link('/coordenacao') : link('')"
         class="sidebar__church"
       >
         <ChurchMark
@@ -137,11 +153,11 @@ const tabs = computed(() => (isCoordinator.value
         <span style="min-width:0"><span class="sidebar__name">{{ churchName }}</span><span class="sidebar__sub">na Guilda</span></span>
       </NuxtLink>
       <nav
-        aria-label="Você"
+        aria-label="Principal"
         style="margin-top:18px"
       >
         <NuxtLink
-          v-for="it in nav1"
+          v-for="it in sidebarItems"
           :key="it.key"
           :to="it.to"
           class="navitem"
@@ -150,34 +166,13 @@ const tabs = computed(() => (isCoordinator.value
           exact-active-class=""
         >
           <Icon :name="it.icon" /><span>{{ it.label }}</span>
+          <span
+            v-if="it.badge"
+            class="badge"
+            :aria-label="`${it.badge} itens pedem atenção`"
+          >{{ it.badge }}</span>
         </NuxtLink>
       </nav>
-      <template v-if="isCoordinator">
-        <p
-          class="sidebar__label"
-          aria-hidden="true"
-        >
-          Coordenação
-        </p>
-        <nav aria-label="Coordenação">
-          <NuxtLink
-            v-for="it in nav2"
-            :key="it.key"
-            :to="it.to"
-            class="navitem"
-            :aria-current="current === it.key ? 'page' : undefined"
-            active-class=""
-            exact-active-class=""
-          >
-            <Icon :name="it.icon" /><span>{{ it.label }}</span>
-            <span
-              v-if="it.badge"
-              class="badge"
-              :aria-label="`${it.badge} pedem atenção`"
-            >{{ it.badge }}</span>
-          </NuxtLink>
-        </nav>
-      </template>
       <NuxtLink
         :to="link('/perfil')"
         class="sidebar__me"

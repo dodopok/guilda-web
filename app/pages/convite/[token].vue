@@ -1,24 +1,30 @@
 <script setup lang="ts">
 import type { ChurchInfo } from '~/types'
+import { rememberLogin } from '~/utils/remembered-login'
 
 useHead({ title: 'Convite · Guilda', meta: [{ name: 'referrer', content: 'no-referrer' }] })
 const route = useRoute()
 const token = String(route.params.token)
-const { load } = useSession()
+const { load, me } = useSession()
 
-interface InviteInfo { churchName: string, timezone: string, firstName: string, expiresAt: string, accountExists: boolean, accentColor: string, hasLogo: boolean }
+interface InviteInfo { churchName: string, timezone: string, firstName: string, expiresAt: string, accountExists: boolean, accentColor: string, hasLogo: boolean, phoneMasked: string | null, reminderEnabled: boolean, reminderWeekday: number, reminderTime: string }
 const invite = ref<InviteInfo | null>(null)
 const loadError = ref('')
-const step = ref(1)
 const password = ref('')
 const confirm = ref('')
 const error = ref('')
 const busy = ref(false)
 const slug = ref('')
+const accepted = ref(false)
+const phone = ref<string | null>(null)
+const church = ref<ChurchInfo['church'] | null>(null)
+const consent = ref(true)
+const hadConsent = ref(false)
 
 onMounted(async () => {
   try {
     invite.value = await api<InviteInfo>(`/invites/${token}`)
+    phone.value = invite.value.phoneMasked
   } catch (e) {
     loadError.value = apiErrorMessage(e, 'Este convite não é mais válido.')
   }
@@ -27,19 +33,28 @@ useHead(() => ({ htmlAttrs: { style: accentStyle(invite.value?.accentColor) } })
 const logo = computed(() => (invite.value?.hasLogo ? `/api/v1/invites/${token}/logo` : null))
 
 const canSubmit = computed(() => (invite.value?.accountExists ? password.value.length > 0 : password.value.length >= 10 && password.value === confirm.value))
-async function createPassword() {
+const passwordStrength = computed(() => {
+  if (!password.value) return { label: 'Mínimo de 10 caracteres', level: 0 }
+  const score = Number(password.value.length >= 10) + Number(/[A-ZÀ-Ý]/.test(password.value)) + Number(/[a-zà-ÿ]/.test(password.value)) + Number(/\d/.test(password.value)) + Number(/[^A-Za-zÀ-ÿ0-9]/.test(password.value))
+  return { label: score >= 4 ? 'Senha forte' : score >= 2 ? 'Senha média' : 'Senha fraca', level: score >= 4 ? 3 : score >= 2 ? 2 : 1 }
+})
+async function acceptInvite() {
   error.value = ''
-  if (!canSubmit.value) {
+  if (!accepted.value && !canSubmit.value) {
     error.value = invite.value?.accountExists ? 'Digite sua senha atual.' : 'Confira a senha: pelo menos 10 caracteres, digitada igual duas vezes.'
     return
   }
   busy.value = true
   try {
-    const res = await api<{ churchSlug: string }>(`/invites/${token}/accept`, { method: 'POST', body: { password: password.value } })
-    slug.value = res.churchSlug
-    await load(true)
-    await loadConsentStep()
-    step.value = 2
+    if (!accepted.value) {
+      const res = await api<{ churchSlug: string }>(`/invites/${token}/accept`, { method: 'POST', body: { password: password.value } })
+      slug.value = res.churchSlug
+      accepted.value = true
+      await load(true)
+      if (me.value?.account.login) rememberLogin(me.value.account.login, me.value.account.displayName)
+      await loadConsentStep()
+    }
+    await saveConsentAndContinue()
   } catch (e) {
     error.value = apiErrorMessage(e)
   } finally {
@@ -47,11 +62,7 @@ async function createPassword() {
   }
 }
 
-// Passo 2: autorização para lembretes (só mensagens individuais, nada de grupo).
-const phone = ref<string | null>(null)
-const church = ref<ChurchInfo['church'] | null>(null)
-const consent = ref(true)
-const hadConsent = ref(false)
+// Autorização para lembretes: só mensagens individuais, nada de grupo.
 async function loadConsentStep() {
   try {
     const [info, me] = await Promise.all([
@@ -62,110 +73,127 @@ async function loadConsentStep() {
     rememberBrand(info)
     phone.value = me.profile.phoneMasked
     hadConsent.value = me.profile.consent?.status === 'granted'
-    consent.value = true
   } catch { /* segue sem o passo de consentimento */ }
 }
-async function saveConsent() {
-  error.value = ''
+async function saveConsentAndContinue() {
   if (phone.value && consent.value !== hadConsent.value) {
-    busy.value = true
-    try {
-      await api(`/churches/${slug.value}/me/consent`, { method: 'PUT', body: { status: consent.value ? 'granted' : 'revoked' } })
-    } catch (e) {
-      error.value = apiErrorMessage(e)
-      busy.value = false
-      return
-    }
-    busy.value = false
+    await api(`/churches/${slug.value}/me/consent`, { method: 'PUT', body: { status: consent.value ? 'granted' : 'revoked' } })
   }
-  step.value = 3
+  await navigateTo(`/i/${slug.value}?bemvindo=1`)
 }
 const reminderLine = computed(() => {
   const c = church.value
-  if (!c?.reminderEnabled) return 'Você recebe suas tarefas e avisos da escala'
-  return `Toda ${WEEKDAYS[c.reminderWeekday]!.replace('-feira', '')} às ${hhmm(c.reminderTime)} você recebe suas tarefas dos próximos dias`
+  const enabled = c?.reminderEnabled ?? invite.value?.reminderEnabled
+  if (!enabled) return 'Você recebe avisos individuais quando a coordenação publicar sua escala'
+  const weekday = c?.reminderWeekday ?? invite.value?.reminderWeekday ?? 0
+  const time = c?.reminderTime ?? invite.value?.reminderTime ?? '19:00'
+  return `Toda ${WEEKDAYS[weekday]!.replace('-feira', '')} às ${hhmm(time)} você recebe suas tarefas dos próximos dias`
 })
 </script>
 
 <template>
   <main
     id="conteudo"
-    class="door"
+    class="door door--auth"
   >
-    <div class="door__card door__card--md stack-lg">
-      <template v-if="loadError">
-        <DoorHead />
-        <div>
-          <h1
-            class="h1"
-            style="font-size:28px"
-          >
-            Convite indisponível
-          </h1>
-          <p
-            class="soft"
-            style="margin-top:8px"
-          >
-            {{ loadError }} Peça à coordenação da sua igreja um novo convite. Se você já tem senha, <NuxtLink to="/entrar">entre por aqui</NuxtLink>.
-          </p>
-        </div>
-      </template>
-      <template v-else-if="invite">
+    <div class="door__auth-card">
+      <header class="door__hero">
         <DoorHead
+          v-if="invite"
           :name="invite.churchName"
           :logo="logo"
-          :size="44"
+          inverse
+        />
+        <DoorHead
+          v-else
+          inverse
+        />
+        <h1 class="door__headline">
+          <template v-if="invite">
+            Oi, {{ invite.firstName }}! {{ invite.accountExists ? 'Vamos entrar na igreja.' : 'Falta só uma senha.' }}
+          </template>
+          <template v-else>
+            Convite indisponível
+          </template>
+        </h1>
+        <p class="door__lede">
+          <template v-if="invite">
+            {{ invite.accountExists ? `${invite.churchName} te convidou para entrar na Guilda.` : `${invite.churchName} te convidou para a Guilda. Crie sua senha e escolha seus lembretes.` }}
+          </template>
+          <template v-else>
+            Peça à coordenação da sua igreja um novo convite.
+          </template>
+        </p>
+      </header>
+      <div class="door__body">
+        <p
+          v-if="loadError"
+          class="soft"
+          role="alert"
         >
-          <span
-            class="dots"
-            aria-hidden="true"
-          ><span
-            v-for="n in 3"
-            :key="n"
-            :class="{ on: n <= step }"
-          /></span>
-        </DoorHead>
-
+          {{ loadError }} <NuxtLink to="/entrar">Entre por aqui.</NuxtLink>
+        </p>
         <form
-          v-if="step === 1"
+          v-else-if="invite"
           class="stack-lg"
           novalidate
-          @submit.prevent="createPassword"
+          @submit.prevent="acceptInvite"
         >
-          <div>
-            <h1
-              class="h1"
-              style="font-size:28px"
-            >
-              Oi, {{ invite.firstName }}!
-            </h1>
+          <div
+            v-if="!accepted"
+            class="stack-md"
+          >
+            <PasswordField
+              v-model="password"
+              :label="invite.accountExists ? 'Sua senha' : 'Crie sua senha'"
+              :autocomplete="invite.accountExists ? 'current-password' : 'new-password'"
+              :placeholder="invite.accountExists ? '' : 'pelo menos 10 caracteres'"
+            />
             <p
-              v-if="invite.accountExists"
-              class="soft"
-              style="margin-top:8px"
+              v-if="!invite.accountExists"
+              class="password-strength"
+              :class="`password-strength--${passwordStrength.level}`"
             >
-              A {{ invite.churchName }} te convidou para a Guilda. Você já tem conta com este celular: digite sua senha para entrar também nesta igreja.
+              <span
+                class="password-strength__bars"
+                aria-hidden="true"
+              ><i
+                v-for="n in 3"
+                :key="n"
+                :class="{ on: n <= passwordStrength.level }"
+              /></span>
+              {{ passwordStrength.label }}
             </p>
-            <p
-              v-else
-              class="soft"
-              style="margin-top:8px"
-            >
-              A {{ invite.churchName }} te convidou para a Guilda — o lugar onde ficam suas escalas, os lembretes e o roteiro do culto. Primeiro, crie uma senha só sua.
-            </p>
+            <PasswordField
+              v-if="!invite.accountExists"
+              v-model="confirm"
+              label="Repita a senha"
+              autocomplete="new-password"
+            />
           </div>
-          <PasswordField
-            v-model="password"
-            :label="invite.accountExists ? 'Sua senha' : 'Crie sua senha'"
-            :autocomplete="invite.accountExists ? 'current-password' : 'new-password'"
-            :placeholder="invite.accountExists ? '' : 'pelo menos 10 caracteres'"
-          />
-          <PasswordField
-            v-if="!invite.accountExists"
-            v-model="confirm"
-            label="Repita a senha"
-            autocomplete="new-password"
-          />
+          <section
+            class="invite-consent"
+            aria-label="Lembretes pelo WhatsApp"
+          >
+            <SwitchRow
+              v-model="consent"
+              title="Quero receber lembretes pelo WhatsApp"
+              boxed
+              large
+              :disabled="!phone"
+            />
+            <p class="small soft">
+              {{ reminderLine }}<template v-if="phone">
+                no <strong style="color:var(--ink)">{{ phone }}</strong>
+              </template>. Mensagens individuais, sem grupos.
+            </p>
+            <p
+              v-if="!phone"
+              class="small soft"
+            >
+              Seu celular ainda não está cadastrado. Peça à coordenação para incluir.
+            </p>
+          </section>
           <p
             v-if="error"
             class="form-error"
@@ -175,117 +203,25 @@ const reminderLine = computed(() => {
           </p>
           <button
             class="btn"
-            :disabled="busy"
+            :disabled="busy || (!accepted && !canSubmit)"
           >
-            {{ invite.accountExists ? 'Entrar' : 'Criar senha' }}
+            {{ busy ? 'Preparando sua conta…' : 'Entrar na Guilda' }}
           </button>
+          <NuxtLink
+            to="/entrar"
+            class="link"
+            style="align-self:center"
+          >
+            Já tem senha? Entrar
+          </NuxtLink>
           <p
             class="muted"
-            style="font-size:13px"
+            style="font-size:13px;text-align:center"
           >
             Este link é só seu e vale até {{ dayMonth(invite.expiresAt, invite.timezone) }}. Não o encaminhe.
           </p>
         </form>
-
-        <template v-else-if="step === 2">
-          <div>
-            <h1
-              class="h1"
-              style="font-size:26px"
-            >
-              Quer receber lembretes pelo WhatsApp?
-            </h1>
-            <p
-              class="soft"
-              style="margin-top:8px"
-            >
-              {{ reminderLine }}<template v-if="phone">
-                no <strong style="color:var(--ink)">{{ phone }}</strong>
-              </template>. Nada de grupo: só mensagens suas.
-            </p>
-          </div>
-          <SwitchRow
-            v-model="consent"
-            title="Sim, quero receber"
-            boxed
-            large
-            :disabled="!phone"
-          />
-          <p
-            v-if="!phone"
-            class="small soft"
-          >
-            Seu celular ainda não está cadastrado. Peça à coordenação para incluir.
-          </p>
-          <p
-            v-if="error"
-            class="form-error"
-            role="alert"
-          >
-            {{ error }}
-          </p>
-          <button
-            type="button"
-            class="btn"
-            :disabled="busy"
-            @click="saveConsent"
-          >
-            Continuar
-          </button>
-          <p
-            class="muted"
-            style="font-size:13px"
-          >
-            Você pode mudar isso depois, em “Você”.
-          </p>
-        </template>
-
-        <template v-else>
-          <h1
-            class="h1"
-            style="font-size:26px"
-          >
-            É simples assim
-          </h1>
-          <div class="stack-md">
-            <div
-              v-for="it in [
-                { icon: 'calendar', t: 'Você recebe sua escala', s: 'A coordenação publica e você vê aqui e no WhatsApp.' },
-                { icon: 'check', t: 'Confirma com um toque', s: 'Ou avisa que não pode — sem constrangimento, a coordenação resolve.' },
-                { icon: 'book', t: 'O roteiro do culto fica aqui', s: 'Quem faz o quê, leituras e músicas do domingo.' },
-              ]"
-              :key="it.t"
-              class="row"
-              style="flex-wrap:nowrap;align-items:flex-start;gap:14px"
-            >
-              <span
-                class="cta-card__icon"
-                style="background:var(--accent-soft)"
-              ><Icon
-                :name="it.icon"
-                :weight="1.9"
-              /></span>
-              <div>
-                <p class="strong">
-                  {{ it.t }}
-                </p>
-                <p
-                  class="soft"
-                  style="font-size:14.5px;margin-top:2px"
-                >
-                  {{ it.s }}
-                </p>
-              </div>
-            </div>
-          </div>
-          <NuxtLink
-            :to="`/i/${slug}?bemvindo=1`"
-            class="btn"
-          >
-            Começar
-          </NuxtLink>
-        </template>
-      </template>
+      </div>
     </div>
   </main>
 </template>

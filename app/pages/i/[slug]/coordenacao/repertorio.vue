@@ -198,6 +198,7 @@ async function save() {
 
     <Sheet
       v-model:open="open"
+      placement="right"
       :title="editing?.id ? 'Editar música' : 'Nova música'"
       lede="Sem letra — só o que ajuda o louvor a achar e tocar."
     >
