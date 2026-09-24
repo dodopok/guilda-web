@@ -203,6 +203,46 @@ describe('roteiro de liturgia e Estêvão', () => {
     expect(published.draft!.template!.changedSince).toBe(true)
   })
 
+  it('responsórios e texto formatado chegam ao publicado, à impressão e ao texto', async () => {
+    const f = await makeChurch(db(), 'porto')
+    const svc = await makeService(db(), f, '2026-11-08')
+    const off = { on: false, leader: '', people: '' }
+    const t = await createTemplate(db(), f.coord.ctx, {
+      name: 'Com respostas',
+      kind: 'regular',
+      blocks: [
+        { type: 'rite', title: 'Saudação', body: 'O Senhor esteja convosco.\n**E contigo também.**\n> Todos de pé.', textSource: 'church' },
+        { type: 'reading', title: 'Primeira leitura', textSource: 'estevao', dutyId: f.duties.leitura },
+        { type: 'psalm', title: 'Salmo', textSource: 'estevao', dutyId: f.duties.leitura, data: { responses: { close: off } } },
+        { type: 'reading', title: 'Evangelho', textSource: 'estevao', dutyId: f.duties.leitura, data: { responses: { open: { on: true, leader: 'Evangelho segundo {evangelista}.', people: 'Glória a vós, Senhor.' }, close: { on: true, leader: 'Evangelho do Senhor.', people: 'Louvado sejas, ó Cristo.' } } } },
+      ],
+    })
+    expect((await getTemplate(db(), f.coord.ctx, t.id)).blocks[2]!.data).toEqual({ responses: { close: off } })
+    await createScript(db(), f.coord.ctx, svc.id, t.id)
+    const sug = await fetchSuggestions(db(), f.coord.ctx, svc.id, okFetch as unknown as typeof fetch)
+    if (!sug.ok) throw new Error('sugestão')
+    // Primeira leitura deuterocanônica neste domingo (referência trocada à mão).
+    const wanted = sug.suggestion.readings.filter((r) => r.key !== 'second_reading').map((r) => ({ key: r.key, reference: r.key === 'first_reading' ? 'Sb 1.13-15' : r.reference, label: r.label }))
+    const view = await applySuggestions(db(), f.coord.ctx, svc.id, { snapshotId: sug.snapshotId, collectIndex: 0, readings: wanted, replaceReadings: true, applyCalendar: true })
+    expect(view.draft!.blocks.find((b) => b.data.slot === 'gospel')!.data.responses!.open!.on).toBe(true)
+    await publishScript(db(), f.coord.ctx, svc.id)
+    const pub = await getPublishedContent(db(), f.coord.ctx, svc.id)
+    const blocks = pub.content.blocks as { title: string, responses: object }[]
+    expect(blocks.find((b) => b.title === 'Primeira leitura')!.responses).toEqual({ close: { leader: 'Aqui termina a leitura.', people: '' } })
+    expect(blocks.find((b) => b.title === 'Salmo')!.responses).toEqual({})
+    expect(blocks.find((b) => b.title === 'Evangelho')!.responses).toEqual({
+      open: { leader: 'Evangelho segundo Mateus.', people: 'Glória a vós, Senhor.' },
+      close: { leader: 'Evangelho do Senhor.', people: 'Louvado sejas, ó Cristo.' },
+    })
+    const html = exportHtml(pub.content, 'America/Sao_Paulo', pub.version)
+    expect(html).toContain('<p><strong>E contigo também.</strong></p>')
+    expect(html).toContain('<p class="rubric">Todos de pé.</p>')
+    expect(html).toContain('<strong>Todos: Louvado sejas, ó Cristo.</strong>')
+    const txt = exportText(pub.content, 'America/Sao_Paulo', pub.version)
+    expect(txt).toContain('*E contigo também.*\n_Todos de pé._')
+    expect(txt).toContain('Evangelho segundo Mateus.\n*Todos: Glória a vós, Senhor.*\nMt 25.1-13\nEvangelho do Senhor.\n*Todos: Louvado sejas, ó Cristo.*')
+  })
+
   it('função nova aparece no roteiro por padrão só se for da liturgia', async () => {
     const f = await makeChurch(db(), 'porto')
     const catalog = await db().query.duties.findMany({ where: (d, { eq: e }) => e(d.churchId, f.church.id) })

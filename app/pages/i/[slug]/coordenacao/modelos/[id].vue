@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Duty } from '~/types'
+import { EVANGELIST_PLACEHOLDER, type ReadingResponses, responsesFor } from '#shared/liturgy'
 
 useHead({ title: 'Editar modelo' })
 const route = useRoute()
@@ -7,7 +8,7 @@ const id = String(route.params.id)
 const { capi, link } = useChurch()
 const toast = useToast()
 
-interface RawBlock { id: string, type: string, title: string, body: string | null, textSource: string, dutyId: string | null }
+interface RawBlock { id: string, type: string, title: string, body: string | null, textSource: string, dutyId: string | null, data?: { responses?: ReadingResponses } }
 interface TemplateFull { id: string, name: string, kind: string, description: string | null, blocks: RawBlock[], upcomingDrafts: number }
 const { data, refresh } = await useAsyncData(`template-${id}`, async () => {
   const [t, c] = await Promise.all([capi<{ template: TemplateFull }>(`/templates/${id}`), capi<{ duties: Duty[] }>('/catalog')])
@@ -16,7 +17,8 @@ const { data, refresh } = await useAsyncData(`template-${id}`, async () => {
 
 // O modelo na tela: um item por bloco que a coordenação enxerga. "Leituras do dia" é um
 // item só, guardado como uma leitura por posição marcada (1ª, salmo, 2ª, evangelho).
-interface Item { key: string, kind: TemplateKindKey, title: string, body: string, loc: boolean, dutyId: string | null, slots: string[] }
+// responses: responsórios por posição de leitura (só em "Leituras do dia").
+interface Item { key: string, kind: TemplateKindKey, title: string, body: string, loc: boolean, dutyId: string | null, slots: string[], responses?: Record<string, ReadingResponses> }
 const form = reactive({ name: '', kind: 'regular' })
 const items = ref<Item[]>([])
 const baseline = ref('')
@@ -39,8 +41,9 @@ function fromBlocks(blocks: RawBlock[]): Item[] {
       const slot = slotOf(b.title)
       if (last?.kind === 'readings') {
         if (!last.slots.includes(slot)) last.slots.push(slot)
+        last.responses![slot] = responsesFor(slot, b.data?.responses)
       } else {
-        out.push({ key: newKey(), kind: 'readings', title: 'Leituras do dia', body: '', loc: false, dutyId: b.dutyId, slots: [slot] })
+        out.push({ key: newKey(), kind: 'readings', title: 'Leituras do dia', body: '', loc: false, dutyId: b.dutyId, slots: [slot], responses: { [slot]: responsesFor(slot, b.data?.responses) } })
       }
       continue
     }
@@ -50,7 +53,7 @@ function fromBlocks(blocks: RawBlock[]): Item[] {
   }
   return out
 }
-interface TplBlock { type: string, title: string, body: string | null, textSource: string, dutyId: string | null }
+interface TplBlock { type: string, title: string, body: string | null, textSource: string, dutyId: string | null, data?: { responses: ReadingResponses } }
 function toBlocks(list: Item[]) {
   return list.flatMap((it): TplBlock[] => {
     const title = it.title.trim() || BLOCK_KINDS[it.kind].label
@@ -60,7 +63,7 @@ function toBlocks(list: Item[]) {
       case 'rite':
       case 'text': return [{ type: it.kind, title, body: it.body.trim() || null, textSource: it.loc ? 'loc_manual' : 'church', dutyId: it.dutyId }]
       case 'collect': return [{ type: 'collect', title, body: null, textSource: 'estevao', dutyId: it.dutyId }]
-      case 'readings': return READING_SLOTS.filter((s) => it.slots.includes(s.slot)).map((s) => ({ type: s.type, title: s.title, body: null, textSource: 'estevao', dutyId: it.dutyId }))
+      case 'readings': return READING_SLOTS.filter((s) => it.slots.includes(s.slot)).map((s) => ({ type: s.type, title: s.title, body: null, textSource: 'estevao', dutyId: it.dutyId, data: { responses: it.responses?.[s.slot] ?? responsesFor(s.slot) } }))
       default: return [{ type: it.kind, title, body: null, textSource: 'church', dutyId: it.dutyId }]
     }
   })
@@ -115,7 +118,16 @@ function remove(i: number) {
 }
 function toggleSlot(it: Item, slot: string) {
   it.slots = it.slots.includes(slot) ? it.slots.filter((s) => s !== slot) : [...it.slots, slot]
+  it.responses = { ...it.responses, [slot]: it.responses?.[slot] ?? responsesFor(slot) }
 }
+// Responsórios de uma posição (sempre completos com o padrão).
+function resp(it: Item, slot: string) {
+  return it.responses?.[slot] ?? responsesFor(slot)
+}
+function setResp(it: Item, slot: string, part: keyof ReadingResponses, v: ReadingResponses[keyof ReadingResponses]) {
+  it.responses = { ...it.responses, [slot]: { ...resp(it, slot), [part]: v } }
+}
+const evangelistHint = `Use ${EVANGELIST_PLACEHOLDER} onde entra o nome: Mateus, Marcos, Lucas ou João, conforme a leitura do dia.`
 
 const adding = ref(false)
 const hasReadings = computed(() => items.value.some((i) => i.kind === 'readings'))
@@ -373,16 +385,58 @@ async function doSave(apply: boolean) {
             </p>
           </fieldset>
 
+          <!-- Responsórios: o que se diz antes e depois de cada leitura marcada. -->
+          <section
+            v-if="it.kind === 'readings' && it.slots.length"
+            class="stack-sm"
+            aria-label="Respostas das leituras"
+          >
+            <p class="field__label">
+              Respostas
+            </p>
+            <div
+              v-for="s in READING_SLOTS.filter((x) => it.slots.includes(x.slot))"
+              :key="s.slot"
+              class="respcard"
+            >
+              <p class="strong">
+                {{ s.title }}
+              </p>
+              <ResponseRow
+                v-if="s.slot === 'gospel'"
+                :model-value="resp(it, s.slot).open!"
+                label="Anúncio antes da leitura"
+                :hint="evangelistHint"
+                @update:model-value="setResp(it, s.slot, 'open', $event)"
+              />
+              <ResponseRow
+                :model-value="resp(it, s.slot).close!"
+                :label="s.slot === 'psalm' ? 'Glória ao Pai no final' : 'Resposta no final'"
+                @update:model-value="setResp(it, s.slot, 'close', $event)"
+              />
+              <ResponseRow
+                v-if="s.slot === 'first_reading' || s.slot === 'second_reading'"
+                :model-value="resp(it, s.slot).deutero!"
+                label="Se for livro deuterocanônico, no final"
+                hint="Vale para Tobias, Judite, Sabedoria, Eclesiástico, Baruc, Macabeus e acréscimos de Ester e Daniel."
+                @update:model-value="setResp(it, s.slot, 'deutero', $event)"
+              />
+            </div>
+          </section>
+
           <template v-if="BLOCK_KINDS[it.kind].hasText">
-            <label class="field">
-              <span class="field__label">Texto</span>
-              <textarea
+            <div class="field">
+              <span
+                class="field__label"
+                aria-hidden="true"
+              >Texto</span>
+              <RichEditor
                 v-model="it.body"
-                class="textarea"
-                style="min-height:100px;resize:vertical;font-size:15.5px"
+                label="Texto"
                 placeholder="O que vai no roteiro de todo culto deste modelo"
               />
-            </label>
+              <span class="field__hint"><strong>Negrito</strong> para o que todos dizem juntos; <em class="rubric-inline">rubrica</em> para instruções.</span>
+            </div>
           </template>
 
           <label

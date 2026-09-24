@@ -14,6 +14,9 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core'
+import type { ReadingResponses } from '../../shared/liturgy'
+
+export interface TemplateBlockData { responses?: ReadingResponses }
 
 // Convenções
 // - Toda tabela com dados de uma comunidade tem church_id.
@@ -561,6 +564,8 @@ export const templateBlocks = pgTable('template_blocks', {
   // Origem do texto, para controle de direitos: church | loc_manual | other
   textSource: text('text_source').notNull().default('church'),
   dutyId: uuid('duty_id'),
+  // Configuração do bloco no modelo (hoje: responsórios de cada leitura).
+  data: jsonb('data').$type<TemplateBlockData>().notNull().default({}),
   createdAt: createdAt(),
 }, (t) => [
   index('template_blocks_template_idx').on(t.templateId),
@@ -621,6 +626,8 @@ export interface ScriptBlockData {
   songIds?: string[]
   // Tom de cada música neste culto (id da música → tom); sem entrada, vale o tom original.
   songKeys?: Record<string, string>
+  // Responsórios desta leitura (copiados do modelo): anúncio, fim e fim para deuterocanônico.
+  responses?: ReadingResponses
   // Avisos: "fixed" volta automaticamente nos próximos roteiros (todo domingo).
   items?: { text: string, ownerPersonId?: string | null, status?: 'draft' | 'ready', fixed?: boolean }[]
   // Texto do modelo no momento da criação, para "voltar ao padrão" num rito adaptado.

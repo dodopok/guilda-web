@@ -9759,6 +9759,79 @@
                               "type": "null"
                             }
                           ]
+                        },
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "responses": {
+                              "type": "object",
+                              "properties": {
+                                "open": {
+                                  "type": "object",
+                                  "properties": {
+                                    "on": {
+                                      "type": "boolean"
+                                    },
+                                    "leader": {
+                                      "type": "string",
+                                      "maxLength": 300
+                                    },
+                                    "people": {
+                                      "type": "string",
+                                      "maxLength": 300
+                                    }
+                                  },
+                                  "required": [
+                                    "on",
+                                    "leader",
+                                    "people"
+                                  ]
+                                },
+                                "close": {
+                                  "type": "object",
+                                  "properties": {
+                                    "on": {
+                                      "type": "boolean"
+                                    },
+                                    "leader": {
+                                      "type": "string",
+                                      "maxLength": 300
+                                    },
+                                    "people": {
+                                      "type": "string",
+                                      "maxLength": 300
+                                    }
+                                  },
+                                  "required": [
+                                    "on",
+                                    "leader",
+                                    "people"
+                                  ]
+                                },
+                                "deutero": {
+                                  "type": "object",
+                                  "properties": {
+                                    "on": {
+                                      "type": "boolean"
+                                    },
+                                    "leader": {
+                                      "type": "string",
+                                      "maxLength": 300
+                                    },
+                                    "people": {
+                                      "type": "string",
+                                      "maxLength": 300
+                                    }
+                                  },
+                                  "required": [
+                                    "on",
+                                    "leader",
+                                    "people"
+                                  ]
+                                }
+                              }
+                            }
+                          }
                         }
                       },
                       "required": [
@@ -10057,6 +10130,79 @@
                               "type": "null"
                             }
                           ]
+                        },
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "responses": {
+                              "type": "object",
+                              "properties": {
+                                "open": {
+                                  "type": "object",
+                                  "properties": {
+                                    "on": {
+                                      "type": "boolean"
+                                    },
+                                    "leader": {
+                                      "type": "string",
+                                      "maxLength": 300
+                                    },
+                                    "people": {
+                                      "type": "string",
+                                      "maxLength": 300
+                                    }
+                                  },
+                                  "required": [
+                                    "on",
+                                    "leader",
+                                    "people"
+                                  ]
+                                },
+                                "close": {
+                                  "type": "object",
+                                  "properties": {
+                                    "on": {
+                                      "type": "boolean"
+                                    },
+                                    "leader": {
+                                      "type": "string",
+                                      "maxLength": 300
+                                    },
+                                    "people": {
+                                      "type": "string",
+                                      "maxLength": 300
+                                    }
+                                  },
+                                  "required": [
+                                    "on",
+                                    "leader",
+                                    "people"
+                                  ]
+                                },
+                                "deutero": {
+                                  "type": "object",
+                                  "properties": {
+                                    "on": {
+                                      "type": "boolean"
+                                    },
+                                    "leader": {
+                                      "type": "string",
+                                      "maxLength": 300
+                                    },
+                                    "people": {
+                                      "type": "string",
+                                      "maxLength": 300
+                                    }
+                                  },
+                                  "required": [
+                                    "on",
+                                    "leader",
+                                    "people"
+                                  ]
+                                }
+                              }
+                            }
+                          }
                         }
                       },
                       "required": [
@@ -10912,6 +11058,74 @@
                               "additionalProperties": {
                                 "type": "string",
                                 "maxLength": 20
+                              }
+                            },
+                            "responses": {
+                              "type": "object",
+                              "properties": {
+                                "open": {
+                                  "type": "object",
+                                  "properties": {
+                                    "on": {
+                                      "type": "boolean"
+                                    },
+                                    "leader": {
+                                      "type": "string",
+                                      "maxLength": 300
+                                    },
+                                    "people": {
+                                      "type": "string",
+                                      "maxLength": 300
+                                    }
+                                  },
+                                  "required": [
+                                    "on",
+                                    "leader",
+                                    "people"
+                                  ]
+                                },
+                                "close": {
+                                  "type": "object",
+                                  "properties": {
+                                    "on": {
+                                      "type": "boolean"
+                                    },
+                                    "leader": {
+                                      "type": "string",
+                                      "maxLength": 300
+                                    },
+                                    "people": {
+                                      "type": "string",
+                                      "maxLength": 300
+                                    }
+                                  },
+                                  "required": [
+                                    "on",
+                                    "leader",
+                                    "people"
+                                  ]
+                                },
+                                "deutero": {
+                                  "type": "object",
+                                  "properties": {
+                                    "on": {
+                                      "type": "boolean"
+                                    },
+                                    "leader": {
+                                      "type": "string",
+                                      "maxLength": 300
+                                    },
+                                    "people": {
+                                      "type": "string",
+                                      "maxLength": 300
+                                    }
+                                  },
+                                  "required": [
+                                    "on",
+                                    "leader",
+                                    "people"
+                                  ]
+                                }
                               }
                             },
                             "items": {

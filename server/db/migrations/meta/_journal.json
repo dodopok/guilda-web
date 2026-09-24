@@ -57,6 +57,13 @@
       "when": 1790210469585,
       "tag": "0007_duty_in_script",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790213882567,
+      "tag": "0008_template_block_data",
+      "breakpoints": true
     }
   ]
 }

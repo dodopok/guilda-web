@@ -223,6 +223,7 @@ export interface BlockData {
   slot?: string
   songIds?: string[]
   songKeys?: Record<string, string>
+  responses?: import('#shared/liturgy').ReadingResponses
   items?: { text: string, ownerPersonId?: string | null, status?: 'draft' | 'ready', fixed?: boolean }[]
   templateBody?: string | null
 }
@@ -238,6 +239,8 @@ export interface PublishedBlock {
   reference: string | null
   responsibles: { name: string, status: string }[]
   songs: { title: string, author: string | null, musicalKey: string | null, link: string | null }[]
+  // Anúncio antes e resposta ao final (leituras e salmo), já resolvidos.
+  responses?: { open?: { leader: string, people: string }, close?: { leader: string, people: string } }
   items: { text: string, owner: string | null, status: string }[]
 }
 
