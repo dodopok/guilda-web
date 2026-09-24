@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Song } from '~/types'
+import { isCifraLink, type SongHit } from '~/composables/useSongSearch'
 
 useHead({ title: 'Repertório' })
 const route = useRoute()
@@ -8,6 +9,24 @@ const toast = useToast()
 const { data, refresh } = await useAsyncData(`repo-${route.params.slug}`, () => capi<{ songs: Song[] }>('/songs'))
 const q = ref('')
 const norm = (s: string) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
+// Busca também no Cifra Club; a escolhida entra no repertório e o tom é lido da cifra, se der.
+const { hits: rawHits, searching, note, adding, addHit: saveHit, reading, readKey: lookupKey } = useSongSearch(q)
+const hits = computed(() => rawHits.value.filter((h) => !(data.value?.songs ?? []).some((s) => s.link === h.link)))
+async function addHit(h: SongHit) {
+  if (await saveHit(h)) {
+    q.value = ''
+    await refresh()
+  }
+}
+async function readKey() {
+  const s = editing.value
+  if (!s?.id) return
+  const song = await lookupKey(s as Song)
+  if (song?.musicalKey) {
+    form.musicalKey = song.musicalKey
+    await refresh()
+  }
+}
 const list = computed(() => (data.value?.songs ?? []).filter((s) => !q.value.trim() || norm(`${s.title} ${s.author ?? ''}`).includes(norm(q.value.trim()))))
 
 const editing = ref<Partial<Song> | null>(null)
@@ -66,7 +85,7 @@ async function save() {
       type="search"
       class="input"
       style="border-radius:14px"
-      placeholder="Buscar por título ou autor"
+      placeholder="Buscar no repertório ou no Cifra Club"
       aria-label="Buscar música"
     >
 
@@ -109,7 +128,7 @@ async function save() {
         style="padding:22px 16px;text-align:center"
       >
         <template v-if="q.trim()">
-          Nada com esse nome.
+          Nada com esse nome no repertório.
           <button
             type="button"
             class="link"
@@ -123,6 +142,59 @@ async function save() {
         </template>
       </div>
     </div>
+
+    <section
+      v-if="hits.length"
+      aria-labelledby="cc-title"
+    >
+      <p
+        id="cc-title"
+        class="caps"
+      >
+        No Cifra Club
+      </p>
+      <div
+        class="card card--flush rows"
+        style="margin-top:6px"
+      >
+        <button
+          v-for="h in hits"
+          :key="h.link"
+          type="button"
+          class="listrow"
+          :disabled="adding"
+          @click="addHit(h)"
+        >
+          <span style="flex:1;min-width:0">
+            <span
+              class="strong"
+              style="display:block"
+            >{{ h.title }}</span>
+            <span
+              class="soft"
+              style="display:block;font-size:13.5px"
+            >{{ h.artist }}</span>
+          </span>
+          <span
+            class="strong xsmall"
+            style="color:var(--accent-deep)"
+          >Adicionar ao repertório</span>
+        </button>
+      </div>
+      <p
+        class="xsmall muted"
+        style="margin-top:6px"
+      >
+        Entra com título, artista e link da cifra. O tom original é lido da cifra quando o Cifra Club permite; senão, abra a música e digite.
+      </p>
+    </section>
+    <p
+      v-if="searching || note"
+      class="muted small"
+      role="status"
+    >
+      {{ searching ? 'Buscando no Cifra Club…' : note }}
+    </p>
 
     <Sheet
       v-model:open="open"
@@ -163,6 +235,16 @@ async function save() {
             maxlength="20"
           ></label>
         </div>
+        <button
+          v-if="editing?.id && !form.musicalKey && isCifraLink(editing.link)"
+          type="button"
+          class="linkbtn"
+          style="align-self:flex-start"
+          :disabled="reading === editing.id"
+          @click="readKey"
+        >
+          {{ reading === editing.id ? 'Lendo o tom…' : 'Ler tom original da cifra' }}
+        </button>
         <label class="field"><span class="field__label">Link (YouTube, cifra, partitura)</span><input
           v-model="form.link"
           class="input"

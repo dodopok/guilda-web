@@ -90,6 +90,7 @@ async function makeChurch(slug: string, name: string, peopleDefs: typeof PEOPLE,
     const [row] = await db.insert(duties).values({
       churchId: church!.id, ministryId: ministryId[d.ministry]!, name: d.name, kind: d.kind ?? 'general', defaultRequiredCount: d.required ?? 1,
       arrivalMinutesBefore: d.arrival ?? null, receivesMusicNotice: d.music ?? false, instructions: d.instructions, position: i, includeByDefault: d.byDefault ?? true,
+      inScript: (d.kind ?? 'general') !== 'general' || d.ministry === 'Liturgia',
     }).returning()
     dutyId[d.key] = row!.id
   }

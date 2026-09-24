@@ -201,6 +201,9 @@ export const duties = pgTable('duties', {
   defaultRequiredCount: integer('default_required_count').notNull().default(1),
   // Função incluída automaticamente nos postos de um culto novo.
   includeByDefault: boolean('include_by_default').notNull().default(true),
+  // Função que aparece no roteiro do culto (liturgia, pregação, leituras, louvor). Apoio
+  // como café, mídia ou lojinha fica só na escala.
+  inScript: boolean('in_script').notNull().default(true),
   active: boolean('active').notNull().default(true),
   position: integer('position').notNull().default(0),
   createdAt: createdAt(),
@@ -584,6 +587,9 @@ export const serviceScripts = pgTable('service_scripts', {
   churchId: uuid('church_id').notNull().references(() => churches.id, { onDelete: 'cascade' }),
   serviceId: uuid('service_id').notNull(),
   templateId: uuid('template_id'),
+  // Quando o modelo foi aplicado (criação ou "refazer pelo modelo"): mudança no modelo
+  // depois disso aparece no roteiro como "o modelo mudou".
+  templateAppliedAt: ts('template_applied_at'),
   status: text('status').notNull().default('draft'), // draft | published
   version: integer('version').notNull().default(0),
   title: text('title').notNull(),

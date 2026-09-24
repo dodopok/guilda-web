@@ -1,0 +1,2 @@
+ALTER TABLE "service_scripts" ADD COLUMN "template_applied_at" timestamp with time zone;--> statement-breakpoint
+UPDATE "service_scripts" SET "template_applied_at" = "created_at" WHERE "template_id" IS NOT NULL;

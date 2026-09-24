@@ -12,13 +12,15 @@ const editor = computed(() => Boolean(data.value?.canEdit))
 const canPublish = computed(() => Boolean(data.value?.canPublish))
 
 // Sem roteiro: a coordenação começa pelo modelo do tipo do culto.
-interface TemplateRow { id: string, name: string, kind: string, archived: boolean }
+interface TemplateRow { id: string, name: string, kind: string, archived: boolean, blockCount: number }
 const templates = ref<TemplateRow[] | null>(null)
 const creating = ref(false)
 async function ensureScript() {
   if (!data.value || data.value.draft || !isCoordinator.value || creating.value) return
   templates.value = (await capi<{ templates: TemplateRow[] }>('/templates')).templates.filter((t) => !t.archived)
-  const t = templates.value.find((x) => x.kind === data.value!.service.kind) ?? templates.value[0]
+  // Modelo vazio (recém-criado) não serve de base: gera um roteiro sem blocos.
+  const usable = templates.value.filter((x) => x.blockCount > 0)
+  const t = usable.find((x) => x.kind === data.value!.service.kind) ?? usable[0]
   if (!t) return
   creating.value = true
   try {
@@ -204,6 +206,12 @@ const exportBase = computed(() => `/api/v1/churches/${slug.value}/scripts/${serv
 
       <!-- Edição: coordenação e pastores -->
       <template v-if="editor">
+        <ScriptTemplateBar
+          v-if="data.draft && canPublish"
+          :view="data"
+          :service-id="serviceId"
+          @refresh="refresh"
+        />
         <ScriptEditor
           v-if="data.draft && aux"
           :view="data"
@@ -219,7 +227,7 @@ const exportBase = computed(() => `/api/v1/churches/${slug.value}/scripts/${serv
           v-else-if="!data.draft"
           class="card--dashed"
         >
-          <template v-if="isCoordinator && templates && !templates.length">
+          <template v-if="isCoordinator && templates && !templates.some((t) => t.blockCount > 0)">
             <p
               class="strong"
               style="font-size:18px"
@@ -230,14 +238,14 @@ const exportBase = computed(() => `/api/v1/churches/${slug.value}/scripts/${serv
               class="soft"
               style="margin:6px auto 0;max-width:420px"
             >
-              O roteiro nasce do modelo da igreja: a ordem do culto e os textos fixos. Crie um para começar.
+              O roteiro nasce do modelo da igreja: a ordem do culto e os textos fixos. {{ templates.length ? 'Os modelos ainda estão vazios: acrescente os blocos para começar.' : 'Crie um para começar.' }}
             </p>
             <NuxtLink
               :to="link('/coordenacao/modelos')"
               class="btn btn--md"
               style="margin-top:16px"
             >
-              Criar modelo de liturgia
+              {{ templates.length ? 'Abrir modelos de liturgia' : 'Criar modelo de liturgia' }}
             </NuxtLink>
           </template>
           <p

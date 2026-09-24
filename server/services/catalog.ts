@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { Db } from '../db/client'
 import { duties, ministries, qualifications, slots } from '../db/schema'
@@ -23,6 +23,8 @@ export const dutySchema = z.object({
   receivesMusicNotice: z.boolean().default(false),
   defaultRequiredCount: z.number().int().min(1).max(50).default(1),
   includeByDefault: z.boolean().default(true),
+  // Sem valor: aparece no roteiro se não for função de apoio (ver scriptDefault).
+  inScript: z.boolean().optional(),
   active: z.boolean().default(true),
   position: z.number().int().min(0).max(1000).optional(),
 })
@@ -50,6 +52,15 @@ export async function updateMinistry(db: Db, ctx: ChurchContext, id: string, inp
   return row
 }
 
+// Padrão de "aparece no roteiro": leitura, sermão, presidência e louvor, ou função do mesmo
+// ministério delas (ex.: Liturgia). Café, mídia, lojinha e afins ficam só na escala.
+async function scriptDefault(db: Db, churchId: string, ministryId: string, kind: string) {
+  if (kind !== 'general') return true
+  const [row] = await db.select({ n: sql<number>`count(*)::int` }).from(duties)
+    .where(and(eq(duties.churchId, churchId), eq(duties.ministryId, ministryId), inArray(duties.kind, ['reading', 'sermon', 'presiding'])))
+  return (row?.n ?? 0) > 0
+}
+
 export async function createDuty(db: Db, ctx: ChurchContext, input: z.infer<typeof dutySchema>) {
   requireCoordinator(ctx)
   const ministry = await db.query.ministries.findFirst({ where: and(eq(ministries.churchId, ctx.church.id), eq(ministries.id, input.ministryId)) })
@@ -64,6 +75,7 @@ export async function createDuty(db: Db, ctx: ChurchContext, input: z.infer<type
     receivesMusicNotice: input.receivesMusicNotice,
     defaultRequiredCount: input.defaultRequiredCount,
     includeByDefault: input.includeByDefault,
+    inScript: input.inScript ?? await scriptDefault(db, ctx.church.id, input.ministryId, input.kind),
     active: input.active,
     position: input.position ?? 0,
   }).returning()

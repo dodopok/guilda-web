@@ -98,10 +98,10 @@ Quem escolhe as músicas busca no repertório da igreja e, na mesma caixa, no Ci
 
 - **Como funciona:** o servidor consulta o serviço de sugestões que a caixa de busca do próprio site usa (`SONG_SEARCH_URL`, padrão `https://solr.sscdn.co/cc/c1`). **Não é uma API oficial nem documentada**: pode mudar ou sair do ar sem aviso. Se falhar, a tela avisa e o repertório continua funcionando. `SONG_SEARCH_URL` vazio desliga a busca.
 - **O que sai e o que fica:** sai só o texto digitado. Ficam só título, artista e o link da cifra (montado a partir de partes validadas). Letra e acordes nunca são buscados nem guardados. Resultados ficam 10 minutos em memória; limite de 60 buscas por minuto por IP.
-- **Tom original:** não vem na busca. A página da cifra bloqueia servidores (403 em 23/09/2026) e seu conteúdo tem direitos autorais, por isso não é lida. Quem escolhe abre a cifra pelo link e digita o tom; se a música ainda não tem tom original no repertório, um toque guarda o digitado como original.
+- **Tom original:** não vem na busca. Ao adicionar uma música do Cifra Club (no roteiro ou no Repertório), o servidor tenta abrir a página da cifra e lê **só** o trecho do tom (`#cifra_tom`, ex.: "tom: G"); letra e acordes são descartados na hora e nada da página é guardado. Só preenche quando o repertório ainda não tem tom. Há também o botão "Ler tom da cifra" para tentar de novo. `SONG_KEY_PAGE_BASE` vazio desliga. **Em 23–24/09/2026 a página recusava servidores (403 da CDN) a partir do ambiente de desenvolvimento; não foi possível testar do Railway.** Quando recusa, a tela avisa e o tom é digitado olhando a cifra (dá para guardar o digitado como tom original).
 - **Tom do culto:** cada roteiro guarda o tom de cada música (`songKeys` no bloco de músicas); sem tom escolhido, vale o original. O aviso ao louvor e o roteiro publicado usam o tom do culto; mudar só o tom gera um novo aviso.
 - **Testes:** o Estêvão simulado (`pnpm estevao:mock`) também responde a busca em `/cc/` com dados fictícios.
-- **Não validado:** termos de uso do Cifra Club para esse serviço de sugestões. Se a igreja preferir não usar, basta deixar `SONG_SEARCH_URL` vazio.
+- **Não validado:** termos de uso do Cifra Club para o serviço de sugestões e para a leitura do tom; se a leitura do tom funciona a partir do Railway. Se a igreja preferir não usar, basta deixar `SONG_SEARCH_URL` vazio.
 
 ## Roteiro, músicas e avisos
 

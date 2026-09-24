@@ -4,9 +4,10 @@ import { describe, expect, it, vi } from 'vitest'
 import { liturgicalSnapshots, outboundMessages, slots } from '../../server/db/schema'
 import {
   applySuggestions, createScript, createSong, createTemplate, duplicateTemplate, exportHtml, exportText, fetchSuggestions,
-  getPublishedContent, getScript, notifyMusic, publishScript, replaceBlocks, searchSongs, setMusic, updateScript,
+  getPublishedContent, getScript, lookupSongKey, notifyMusic, publishScript, rebuildFromTemplate, replaceBlocks, searchSongs, setMusic, updateScript, updateTemplate,
 } from '../../server/services/liturgy'
 import { assignPerson, publishMonth, reassign } from '../../server/services/schedule'
+import { createDuty } from '../../server/services/catalog'
 import { makeChurch, makeService, slotOf, useDb, type ChurchFixture } from '../helpers'
 import type { Db } from '../../server/db/client'
 
@@ -122,6 +123,83 @@ describe('roteiro de liturgia e Estêvão', () => {
     expect(blocks[1]!.type).toBe('collect')
     expect(blocks.slice(2).map((b) => [b.data.slot, b.data.reference])).toEqual([['first_reading', 'Am 5.18-24'], ['psalm', 'Sl 70'], ['gospel', 'Mt 25.1-13']])
     expect(blocks.find((b) => b.type === 'psalm')!.responsibles.map((r) => r.name)).toEqual(['Carla Dias'])
+  })
+
+  it('refazer pelo modelo mantém o que foi preenchido; avisa modelo alterado e funções fora do roteiro', async () => {
+    const { f, svc, t } = await setup(db())
+    let view = await getScript(db(), f.coord.ctx, svc.id)
+    expect(view.draft!.template).toMatchObject({ id: t.id, name: 'Domingo comum', changedSince: false })
+    // O modelo base mostra abertura, leitura e sermão; o louvor escalado não tem bloco com a função.
+    const outside1 = view.draft!.dutiesOutside.map((d) => d.id)
+    expect(outside1).toContain(f.duties.louvor)
+    expect(outside1).not.toContain(f.duties.abertura)
+    expect(outside1).not.toContain(f.duties.leitura)
+    // Funções de apoio ficam só na escala.
+    expect(outside1).not.toContain(f.duties.cafe)
+    expect(outside1).not.toContain(f.duties.holyrics)
+
+    const sug = await fetchSuggestions(db(), f.coord.ctx, svc.id, okFetch as unknown as typeof fetch)
+    if (!sug.ok) throw new Error('sugestão')
+    view = await applySuggestions(db(), f.coord.ctx, svc.id, {
+      snapshotId: sug.snapshotId, collectIndex: 0, readings: sug.suggestion.readings.map((r) => ({ key: r.key, reference: r.reference, label: r.label })), replaceReadings: true, applyCalendar: true,
+    })
+    const edited = view.draft!.blocks.map((b) => ({ type: b.type as 'reading', title: b.title, body: b.body, textSource: b.textSource as 'church', dutyId: b.dutyId, personId: b.data.slot === 'first_reading' ? f.bruno.id : b.personId, data: b.data }))
+    await replaceBlocks(db(), f.coord.ctx, svc.id, { blocks: edited })
+    const song = await createSong(db(), f.coord.ctx, { title: 'Cântico', musicalKey: 'D' })
+    await setMusic(db(), f.coord.ctx, svc.id, { songIds: [song.id], songKeys: { [song.id]: 'E' } })
+
+    await updateTemplate(db(), f.coord.ctx, t.id, { name: 'Domingo comum' })
+    expect((await getScript(db(), f.coord.ctx, svc.id)).draft!.template!.changedSince).toBe(true)
+
+    const novo = await createTemplate(db(), f.coord.ctx, {
+      name: 'Nova ordem',
+      kind: 'regular',
+      blocks: [
+        { type: 'heading', title: 'Nome do domingo', textSource: 'estevao' },
+        { type: 'collect', title: 'Coleta do dia', textSource: 'estevao' },
+        { type: 'reading', title: 'Primeira leitura', textSource: 'estevao', dutyId: f.duties.leitura },
+        { type: 'psalm', title: 'Salmo', textSource: 'estevao', dutyId: f.duties.leitura },
+        { type: 'reading', title: 'Evangelho', textSource: 'estevao', dutyId: f.duties.leitura },
+        { type: 'music', title: 'Músicas', textSource: 'church', dutyId: f.duties.louvor },
+      ],
+    })
+    const rebuilt = await rebuildFromTemplate(db(), f.coord.ctx, svc.id, novo.id)
+    const blocks = rebuilt.draft!.blocks
+    expect(blocks.map((b) => b.type)).toEqual(['heading', 'collect', 'reading', 'psalm', 'reading', 'music'])
+    expect(blocks[0]!.title).toBe('Domingo Próprio 27')
+    expect(blocks[1]!.body).toContain('coleta para teste')
+    expect(blocks.slice(2, 5).map((b) => b.data.reference)).toEqual(['Am 5.18-24', 'Sl 70', 'Mt 25.1-13'])
+    expect(blocks[2]!.responsibles.map((r) => r.name)).toEqual(['Bruno Reis'])
+    expect(blocks[5]!.data).toMatchObject({ songIds: [song.id], songKeys: { [song.id]: 'E' } })
+    expect(rebuilt.draft!.template).toMatchObject({ id: novo.id, changedSince: false })
+    const outside2 = rebuilt.draft!.dutiesOutside.map((d) => d.id)
+    expect(outside2).toEqual(expect.arrayContaining([f.duties.abertura, f.duties.sermao]))
+    expect(outside2).not.toContain(f.duties.louvor)
+    await expect(rebuildFromTemplate(db(), f.ana.ctx, svc.id, novo.id)).rejects.toMatchObject({ status: 403 })
+  })
+
+  it('função nova aparece no roteiro por padrão só se for da liturgia', async () => {
+    const f = await makeChurch(db(), 'porto')
+    const catalog = await db().query.duties.findMany({ where: (d, { eq: e }) => e(d.churchId, f.church.id) })
+    const ministryOf = (id: string) => catalog.find((d) => d.id === id)!.ministryId
+    const lit = await createDuty(db(), f.coord.ctx, { ministryId: ministryOf(f.duties.abertura!), name: 'Intercessão', kind: 'general', receivesMusicNotice: false, defaultRequiredCount: 1, includeByDefault: true, active: true })
+    const apoio = await createDuty(db(), f.coord.ctx, { ministryId: ministryOf(f.duties.cafe!), name: 'Chá', kind: 'general', receivesMusicNotice: false, defaultRequiredCount: 1, includeByDefault: true, active: true })
+    const marcada = await createDuty(db(), f.coord.ctx, { ministryId: ministryOf(f.duties.cafe!), name: 'Ceia', kind: 'general', inScript: true, receivesMusicNotice: false, defaultRequiredCount: 1, includeByDefault: true, active: true })
+    expect([lit.inScript, apoio.inScript, marcada.inScript]).toEqual([true, false, true])
+  })
+
+  it('tom original lido da cifra só preenche quando o repertório não tem tom', async () => {
+    const { f } = await setup(db())
+    const link = 'https://www.cifraclub.com.br/artista-de-exemplo/cancao/'
+    const page = vi.fn(async () => new Response('<span id="cifra_tom">tom: <a>A</a></span>', { status: 200 }))
+    const s1 = await createSong(db(), f.coord.ctx, { title: 'Canção', link })
+    const r1 = await lookupSongKey(db(), f.coord.ctx, s1.id, page as unknown as typeof fetch)
+    expect(r1).toMatchObject({ song: { musicalKey: 'A' }, keyLookup: { status: 'found', key: 'A' } })
+    const s2 = await createSong(db(), f.coord.ctx, { title: 'Outra', musicalKey: 'C', link: 'https://www.cifraclub.com.br/artista-de-exemplo/outra/' })
+    const r2 = await lookupSongKey(db(), f.coord.ctx, s2.id, page as unknown as typeof fetch)
+    expect(r2.song.musicalKey).toBe('C')
+    const s3 = await createSong(db(), f.coord.ctx, { title: 'Sem link' })
+    expect((await lookupSongKey(db(), f.coord.ctx, s3.id)).keyLookup.status).toBe('not_found')
   })
 
   it('falha do Estêvão não impede o roteiro: preenchimento manual continua', async () => {

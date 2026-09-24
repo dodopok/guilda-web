@@ -92,6 +92,7 @@ export interface Duty {
   receivesMusicNotice: boolean
   defaultRequiredCount: number
   includeByDefault: boolean
+  inScript: boolean
   active: boolean
   position: number
 }
@@ -264,6 +265,10 @@ export interface ScriptView {
     pastoralNote: string | null
     musicChooser: 'preacher' | 'pastors'
     updatedAt: string
+    // Modelo de origem; changedSince = o modelo mudou depois de aplicado a este roteiro.
+    template: { id: string, name: string, archived: boolean, changedSince: boolean } | null
+    // Funções escaladas neste culto que nenhum bloco do roteiro mostra.
+    dutiesOutside: { id: string, name: string }[]
     snapshot: { id: string, source: string, fetchedAt: string, requestPath: string | null, prayerBook: string } | null
     blocks: ScriptBlock[]
     hasUnpublishedChanges: boolean

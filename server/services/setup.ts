@@ -85,6 +85,7 @@ export async function applySetupDuties(db: Db, ctx: ChurchContext, input: z.infe
         receivesMusicNotice: Boolean(c.musicNotice),
         defaultRequiredCount: c.required,
         includeByDefault: true,
+        inScript: c.kind !== 'general' || nameKey(c.ministry) === nameKey('Liturgia'),
         position: i,
       })
       created++

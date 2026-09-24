@@ -2,12 +2,14 @@ import { z } from 'zod'
 
 // Busca de músicas no Cifra Club, usando o mesmo serviço de sugestões da caixa de busca
 // do site (não é uma API oficial nem documentada). Só enviamos o que a pessoa digitou e
-// só guardamos título, artista e o link da cifra. O tom não vem nessa busca: a página da
-// cifra bloqueia servidores e seu conteúdo (letra e acordes) tem direitos autorais, por
-// isso o tom é digitado por quem escolhe, olhando o link.
+// só guardamos título, artista e o link da cifra. O tom não vem nessa busca: tentamos lê-lo
+// da página da cifra (só o campo "tom", nada de letra ou acordes); se a página recusar,
+// quem escolhe digita o tom olhando o link.
 
 export interface SongSearchConfig {
   url: string
+  // Endereço das páginas de cifra (trocado por um simulado nos testes). Vazio desliga a leitura do tom.
+  pageBase?: string
   timeoutMs: number
   fetchImpl?: typeof fetch
 }
@@ -69,4 +71,50 @@ export async function searchCifraClub(config: SongSearchConfig, query: string): 
   cache.set(key, { at: Date.now(), hits })
   if (cache.size > 500) cache.delete(cache.keys().next().value!)
   return hits
+}
+
+// Link de cifra aceito: só o domínio do Cifra Club, com artista e música em formato de slug.
+const CIFRA_LINK = /^https:\/\/www\.cifraclub\.com\.br\/([a-z0-9-]+)\/([a-z0-9-]+)\/$/i
+export const isCifraLink = (link: string | null | undefined) => Boolean(link && CIFRA_LINK.test(link))
+
+const KEY = /^([A-G](?:#|b)?m?)$/
+// Lê só o tom (ex.: "tom: G") do trecho #cifra_tom da página. Nada mais é aproveitado.
+export function extractKey(html: string): string | null {
+  const at = html.search(/id=["']cifra_tom["']/i)
+  if (at < 0) return null
+  const end = html.indexOf('</span>', at)
+  const chunk = html.slice(at, end > at ? end : at + 400).replace(/<[^>]*>/g, ' ').replace(/^[^>]*>/, ' ')
+  const m = chunk.match(/tom\s*:?\s*([A-G](?:#|b)?m?)(?![a-z#])/i)
+  const key = m?.[1] ? m[1].charAt(0).toUpperCase() + m[1].slice(1) : null
+  return key && KEY.test(key) ? key : null
+}
+
+export type KeyLookup = { status: 'found', key: string } | { status: 'not_found' | 'unavailable', reason: string }
+const keyCache = new Map<string, { at: number, result: KeyLookup }>()
+
+export async function lookupCifraKey(config: SongSearchConfig, link: string): Promise<KeyLookup> {
+  const m = link.match(CIFRA_LINK)
+  if (!m) return { status: 'not_found', reason: 'O link não é de uma cifra do Cifra Club.' }
+  if (!config.pageBase) return { status: 'unavailable', reason: 'Leitura do tom desligada nesta instalação.' }
+  const cached = keyCache.get(link)
+  // Tom achado vale um dia; falha é tentada de novo depois de uma hora.
+  if (cached && Date.now() - cached.at < (cached.result.status === 'found' ? 86400_000 : 3600_000)) return cached.result
+  let result: KeyLookup
+  try {
+    const res = await (config.fetchImpl ?? fetch)(`${config.pageBase}/${m[1]}/${m[2]}/`, {
+      headers: { 'Accept': 'text/html', 'Accept-Language': 'pt-BR,pt;q=0.9' },
+      signal: AbortSignal.timeout(config.timeoutMs),
+    })
+    if (!res.ok) {
+      result = { status: 'unavailable', reason: res.status === 403 ? 'O Cifra Club recusou a leitura da página.' : `O Cifra Club respondeu com erro ${res.status}.` }
+    } else {
+      const key = extractKey((await res.text()).slice(0, 2_000_000))
+      result = key ? { status: 'found', key } : { status: 'not_found', reason: 'A página da cifra não informa o tom.' }
+    }
+  } catch (err) {
+    result = { status: 'unavailable', reason: `Não foi possível abrir a cifra: ${(err as Error).message}` }
+  }
+  keyCache.set(link, { at: Date.now(), result })
+  if (keyCache.size > 1000) keyCache.delete(keyCache.keys().next().value!)
+  return result
 }

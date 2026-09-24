@@ -29,6 +29,12 @@ createServer((req, res) => {
       { tipo: '2', art: 'Outro Artista', txt: `${q} ao vivo (exemplo)`, dns: 'outro-artista', url: 'cancao-ao-vivo' },
     ] } }))
   }
+  // Página de cifra fictícia, só com o trecho do tom (SONG_KEY_PAGE_BASE=http://localhost:4010/cifra).
+  if (url.pathname.startsWith('/cifra/')) {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8')
+    if (url.pathname.includes('sem-tom')) return res.end('<html><body><h1>Sem tom</h1></body></html>')
+    return res.end('<html><body><span id="cifra_tom">tom: <a class="js-modal-trigger" href="#" title="alterar o tom">G</a></span></body></html>')
+  }
   const m = url.pathname.match(/^\/api\/v2\/days\/(\d{4})-(\d{2})-(\d{2})$/)
   if (!req.headers['x-api-key']) return problem(res, 401, 'MISSING_API_KEY', 'Envie sua chave no cabeçalho X-API-Key.')
   if (!m) return problem(res, 404, 'NOT_FOUND', 'Rota inexistente.')

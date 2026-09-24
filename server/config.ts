@@ -36,6 +36,8 @@ export function getConfig() {
     // Busca de músicas no Cifra Club (SONG_SEARCH_URL vazio desliga).
     songSearch: {
       url: (env.SONG_SEARCH_URL ?? 'https://solr.sscdn.co/cc/c1').replace(/\/$/, ''),
+      // Páginas de cifra, para ler só o tom original (SONG_KEY_PAGE_BASE vazio desliga).
+      pageBase: (env.SONG_KEY_PAGE_BASE ?? 'https://www.cifraclub.com.br').replace(/\/$/, ''),
       timeoutMs: int(env.SONG_SEARCH_TIMEOUT_MS, 5000),
     },
     worker: {

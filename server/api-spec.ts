@@ -142,10 +142,12 @@ export const ROUTES: RouteDoc[] = [
   { method: 'get', path: `${C}/scripts/{serviceId}/liturgical-data`, summary: 'Consultar o Estêvão e guardar foto; em falha devolve erro e última foto', auth: 'coordinator' },
   { method: 'post', path: `${C}/scripts/{serviceId}/liturgical-data/apply`, summary: 'Aplicar coleta, leituras e calendário escolhidos', auth: 'coordinator', body: applySchema },
   { method: 'put', path: `${C}/scripts/{serviceId}/music`, summary: 'Escolher músicas (quem prega, pastores ou coordenação)', auth: 'session', body: musicSchema },
+  { method: 'post', path: `${C}/scripts/{serviceId}/rebuild`, summary: 'Refazer o roteiro pelo modelo, mantendo o que já foi preenchido', auth: 'coordinator' },
   { method: 'post', path: `${C}/scripts/{serviceId}/music/notify`, summary: 'Aviso individual ao louvor escalado', auth: 'session' },
   { method: 'get', path: `${C}/songs`, summary: 'Repertório', auth: 'session' },
   { method: 'post', path: `${C}/songs`, summary: 'Cadastrar música', auth: 'session', body: songSchema },
   { method: 'get', path: `${C}/songs/search`, summary: 'Buscar músicas no Cifra Club (título, artista e link; parâmetro q)', auth: 'session' },
+  { method: 'post', path: `${C}/songs/{id}/key-lookup`, summary: 'Ler o tom original na página da cifra do Cifra Club', auth: 'session' },
   { method: 'patch', path: `${C}/songs/{id}`, summary: 'Alterar música', auth: 'session', body: songSchema.partial() },
 ]
 
