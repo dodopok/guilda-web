@@ -37,6 +37,7 @@ const paths: Record<string, string> = {
   'sparkle': 'M12 3v4M12 17v4M3 12h4M17 12h4M6.3 6.3l2.8 2.8M14.9 14.9l2.8 2.8M6.3 17.7l2.8-2.8M14.9 9.1l2.8-2.8',
   'upload': 'M12 15V4M7 8.5L12 3.5l5 5M5 19.5h14',
   'chevron-up': 'M18 14.5l-6-6-6 6',
+  'grip': 'M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01',
   'chevron-left': 'M14.5 6l-6 6 6 6',
 }
 const d = computed(() => paths[props.name] ?? paths.circle)

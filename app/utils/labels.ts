@@ -33,14 +33,7 @@ export const BLOCK_TYPE_LABEL: Record<string, string> = {
   sermon: 'Sermão',
   music: 'Músicas',
   announcements: 'Avisos',
-  text: 'Texto livre',
-}
-
-export const TEXT_SOURCE_LABEL: Record<string, string> = {
-  church: 'Texto da igreja',
-  loc_manual: 'Texto do LOC (cadastrado pela coordenação)',
-  estevao: 'Estêvão',
-  other: 'Outra fonte',
+  text: 'Texto fixo',
 }
 
 export const WEEKDAYS = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado']
@@ -78,11 +71,11 @@ export function messageTint(status: string) {
 export type TemplateKindKey = 'heading' | 'sunday' | 'rite' | 'collect' | 'readings' | 'sermon' | 'music' | 'announcements' | 'text'
 export const BLOCK_KINDS: Record<TemplateKindKey, { label: string, sub: string, bg: string, fg: string, estevao?: boolean, hasText?: boolean, hasDuty?: boolean }> = {
   heading: { label: 'Título', sub: 'Separa partes do culto', bg: '#1d221f', fg: '#fff' },
-  rite: { label: 'Rito / texto fixo', sub: 'Texto que a igreja digita uma vez', bg: '#f0efe9', fg: '#4a5450', hasText: true, hasDuty: true },
+  rite: { label: 'Rito ou texto fixo', sub: 'Oração, rito ou instrução que se repete', bg: '#f0efe9', fg: '#4a5450', hasText: true, hasDuty: true },
   sermon: { label: 'Sermão', sub: 'Quem prega escolhe o texto', bg: '#fff1d6', fg: '#a86400', hasDuty: true },
-  music: { label: 'Músicas', sub: 'Do repertório', bg: '#efe6fb', fg: '#5b3aa6', hasDuty: true },
+  music: { label: 'Músicas', sub: 'Escolhidas a cada culto', bg: '#efe6fb', fg: '#5b3aa6', hasDuty: true },
   announcements: { label: 'Avisos', sub: 'Fixos e do período', bg: '#fde4e0', fg: '#8f2a1e', hasDuty: true },
-  text: { label: 'Texto livre', sub: 'O que precisar', bg: '#f0efe9', fg: '#4a5450', hasText: true, hasDuty: true },
+  text: { label: 'Rito ou texto fixo', sub: 'Oração, rito ou instrução que se repete', bg: '#f0efe9', fg: '#4a5450', hasText: true, hasDuty: true },
   sunday: { label: 'Nome do domingo', sub: 'Ex.: 19º Domingo no Tempo Comum (Próprio 23)', bg: '#e3ebf8', fg: '#2f5fa8', estevao: true },
   collect: { label: 'Coleta do dia', sub: 'A oração própria do domingo', bg: '#e3ebf8', fg: '#2f5fa8', estevao: true, hasDuty: true },
   readings: { label: 'Leituras do dia', sub: '1ª leitura, salmo, 2ª leitura e evangelho', bg: '#e3ebf8', fg: '#2f5fa8', estevao: true, hasDuty: true },

@@ -215,6 +215,23 @@ function toggleFixed(i: number) {
   items[i] = { ...items[i]!, fixed: !items[i]!.fixed }
   b.data = { ...b.data, items }
 }
+// Avisos na ordem em que serão lidos: arrastar pela alça.
+const avisosEl = ref<HTMLElement | null>(null)
+const avisoItems = computed({
+  get: () => announcements.value?.data.items ?? [],
+  set: (items) => {
+    const b = announcements.value
+    if (b) b.data = { ...b.data, items }
+  },
+})
+const { moveItem: moveAviso } = useSortableList(avisosEl, avisoItems)
+async function moveAvisoByKey(i: number, dir: -1 | 1) {
+  const j = i + dir
+  if (j < 0 || j >= avisoItems.value.length) return
+  moveAviso(i, j)
+  await nextTick()
+  avisosEl.value?.querySelectorAll<HTMLElement>('.drag-handle')[j]?.focus()
+}
 function removeAviso(i: number) {
   const b = announcements.value!
   b.data = { ...b.data, items: (b.data.items ?? []).filter((_, k) => k !== i) }
@@ -835,9 +852,10 @@ async function saveDraft() {
               class="soft small"
               style="margin:4px 0 10px"
             >
-              Toque na etiqueta para alternar “todo domingo” e “só agora”.
+              Arraste para mudar a ordem de leitura. Toque na etiqueta para alternar “todo domingo” e “só agora”.
             </p>
             <div
+              ref="avisosEl"
               class="stack-sm"
               style="gap:6px"
             >
@@ -845,8 +863,20 @@ async function saveDraft() {
                 v-for="(a, i) in it.block.data.items ?? []"
                 :key="i"
                 class="row"
-                style="flex-wrap:nowrap;align-items:flex-start;padding:10px 12px;border-radius:12px;background:var(--surface-3)"
+                style="flex-wrap:nowrap;align-items:flex-start;padding:10px 12px 10px 2px;border-radius:12px;background:var(--surface-3)"
               >
+                <button
+                  type="button"
+                  class="drag-handle drag-handle--sm"
+                  :aria-label="`Mover aviso ${i + 1}. Arraste ou use as setas.`"
+                  @keydown.up.prevent="moveAvisoByKey(i, -1)"
+                  @keydown.down.prevent="moveAvisoByKey(i, 1)"
+                >
+                  <Icon
+                    name="grip"
+                    :weight="3"
+                  />
+                </button>
                 <span
                   class="grow"
                   style="font-size:15px;line-height:1.45"

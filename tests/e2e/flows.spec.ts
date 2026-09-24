@@ -217,7 +217,7 @@ test('músicas: repertório e busca no Cifra Club, tom deste culto no aviso ao l
   await coord.context().close()
 })
 
-test('modelo de liturgia: título fixo, nome do domingo, rito do LOC e leituras marcadas', async ({ browser }) => {
+test('modelo de liturgia: título fixo, nome do domingo, rito e leituras marcadas, arrastar', async ({ browser }) => {
   const coord = await as(browser, PHONES.coord)
   await coord.goto('/i/porto/coordenacao/modelos')
   await coord.getByRole('button', { name: /Criar modelo/ }).click()
@@ -241,25 +241,26 @@ test('modelo de liturgia: título fixo, nome do domingo, rito do LOC e leituras 
   await expect(coord.getByText('Funções da escala fora deste modelo.')).toHaveCount(0)
   await addBlock('Título')
   // Título é só texto: sem escolha de fonte.
-  await expect(coord.getByText('É texto do Livro de Oração (LOC)')).toHaveCount(0)
-  await coord.getByLabel('Título no roteiro').fill('Liturgia da Palavra')
+  await coord.getByLabel('Nome no roteiro').fill('Liturgia da Palavra')
   await addBlock('Nome do domingo')
   await expect(coord.getByText(/com o Próprio no Tempo Comum/)).toBeVisible()
   await addBlock('Rito')
-  await coord.getByLabel('Título no roteiro').fill('Confissão')
+  await coord.getByLabel('Nome no roteiro').fill('Confissão')
   await coord.getByRole('textbox', { name: 'Texto', exact: true }).fill('Texto de exemplo')
-  await coord.getByText('É texto do Livro de Oração (LOC)').click()
   await addBlock('Leituras do dia')
   await coord.getByRole('checkbox', { name: 'Segunda leitura' }).uncheck()
+  // Reordenar pelo teclado na alça (o mesmo que arrastar): nome do domingo vai para o topo.
+  await coord.getByRole('button', { name: /^Mover Nome do domingo/ }).press('ArrowUp')
+  await expect(coord.getByRole('button', { name: /^Mover Nome do domingo \(posição 1/ })).toBeFocused()
   await coord.getByRole('button', { name: 'Salvar modelo' }).click()
   await expect(coord.getByText(/Modelo salvo/)).toBeVisible()
 
   const res = await coord.request.get(`/api/v1/churches/porto/templates/${id}`)
   const { template } = await res.json() as { template: { blocks: { type: string, title: string, textSource: string }[] } }
   expect(template.blocks.map((b) => [b.type, b.title, b.textSource])).toEqual([
-    ['heading', 'Liturgia da Palavra', 'church'],
     ['heading', 'Nome do domingo', 'estevao'],
-    ['rite', 'Confissão', 'loc_manual'],
+    ['heading', 'Liturgia da Palavra', 'church'],
+    ['rite', 'Confissão', 'church'],
     ['reading', 'Primeira leitura', 'estevao'],
     ['psalm', 'Salmo', 'estevao'],
     ['reading', 'Evangelho', 'estevao'],
