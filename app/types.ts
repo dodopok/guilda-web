@@ -46,11 +46,13 @@ export interface ChurchInfo {
 
 export interface Task {
   assignmentId: string
+  personId: string
   status: 'pending' | 'confirmed' | 'declined'
   rowVersion: number
   service: { id: string, title: string, startsAt: string, localDate: string, time: string, location: string | null, status: string }
   duty: { id: string, name: string, instructions: string | null, ministry: string, kind: string }
   arrivalAt: string | null
+  coworkers: { personId: string, displayName: string, duties: string[] }[]
   note: string | null
   respondBy: string
   openSwaps: { id: string, candidateName: string, createdAt: string }[]
@@ -73,12 +75,16 @@ export interface Swap {
   createdAt: string
   respondedAt: string | null
   direction: 'received' | 'sent'
+  assignmentId: string
+  serviceId: string
   fromName: string
   candidateName: string
   dutyName: string
   serviceTitle: string
   startsAt: string
   location: string | null
+  arrivalAt: string | null
+  coworkers: string[]
 }
 
 export interface Ministry { id: string, name: string, description: string | null, position: number }
@@ -236,6 +242,8 @@ export interface PublishedBlock {
   title: string
   body: string | null
   textSource: string
+  dutyId: string | null
+  personId: string | null
   reference: string | null
   responsibles: { name: string, status: string }[]
   songs: { title: string, author: string | null, musicalKey: string | null, link: string | null }[]

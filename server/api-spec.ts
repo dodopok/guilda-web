@@ -3,7 +3,7 @@
 // Um teste confere que toda rota em server/api/v1 está listada aqui.
 import { z } from 'zod'
 import { availabilityRequestSchemaDoc } from './services/doc-schemas'
-import { consentSchema, personInputSchema, personUpdateSchema } from './services/people'
+import { consentSchema, myProfileUpdateSchema, personInputSchema, personUpdateSchema } from './services/people'
 import { dutySchema, ministrySchema } from './services/catalog'
 import { createChurchSchema, updateChurchSchema } from './services/churches'
 import { serviceInputSchema, serviceUpdateSchema, slotInputSchema } from './services/worship'
@@ -65,6 +65,7 @@ export const ROUTES: RouteDoc[] = [
   { method: 'get', path: `${C}/people/{id}/availability/{month}`, summary: 'Indisponibilidades de uma pessoa no mês', auth: 'coordinator' },
   { method: 'put', path: `${C}/people/{id}/availability/{month}`, summary: 'Registrar resposta recebida por outro canal', auth: 'coordinator', body: submitSchema },
   { method: 'get', path: `${C}/me`, summary: 'Perfil da pessoa na igreja', auth: 'session' },
+  { method: 'patch', path: `${C}/me`, summary: 'Alterar nome e telefone do próprio perfil', auth: 'session', body: myProfileUpdateSchema },
   { method: 'get', path: `${C}/me/home`, summary: 'Início: próximas tarefas, pedidos de troca e de indisponibilidade', auth: 'session' },
   { method: 'get', path: `${C}/me/tasks`, summary: 'Minhas tarefas em escalas publicadas', auth: 'session', query: { past: '1 inclui as dos últimos 90 dias' } },
   { method: 'get', path: `${C}/me/swaps`, summary: 'Pedidos de troca enviados e recebidos', auth: 'session' },

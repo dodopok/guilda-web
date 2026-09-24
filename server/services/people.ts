@@ -6,7 +6,7 @@ import { badRequest, forbidden, notFound } from '../lib/errors'
 import { maskPhone, normalizePhone } from '../lib/phone'
 import { nameKey } from '../lib/text'
 import { audit } from './audit'
-import { type ChurchContext, ROLES, isCoordinator, requireCoordinator } from './context'
+import { type ChurchContext, ROLES, isCoordinator, requireCoordinator, requirePerson } from './context'
 
 const phoneField = z.string().trim().max(30).nullable().optional().transform((v, c) => {
   if (v === undefined) return undefined
@@ -35,6 +35,11 @@ export const personUpdateSchema = z.object({
   restExempt: z.boolean().optional(),
   status: z.enum(['active', 'inactive']).optional(),
   notes: z.string().trim().max(1000).nullable().optional(),
+})
+
+export const myProfileUpdateSchema = z.object({
+  displayName: z.string().trim().min(2).max(120),
+  phone: phoneField,
 })
 
 async function assertDutiesInChurch(db: DbOrTx, churchId: string, dutyIds: string[]) {
@@ -106,6 +111,38 @@ export async function updatePerson(db: Db, ctx: ChurchContext, personId: string,
     })
     return updated!
   })
+}
+
+// The member may change only their own display name and phone from the profile page.
+// Changing the phone revokes old consent and pending invitations, just like coordination edits.
+export async function updateMyProfile(db: Db, ctx: ChurchContext, raw: z.input<typeof myProfileUpdateSchema>) {
+  const personId = requirePerson(ctx)
+  const input = myProfileUpdateSchema.parse(raw)
+  await db.transaction(async (tx) => {
+    const person = await tx.query.people.findFirst({ where: and(eq(people.churchId, ctx.church.id), eq(people.id, personId)) })
+    if (!person) throw notFound('Pessoa')
+    const phoneChanged = input.phone !== undefined && input.phone !== person.phoneE164
+    await tx.update(people).set({
+      displayName: input.displayName,
+      nameKey: nameKey(input.displayName),
+      ...(input.phone !== undefined ? { phoneE164: input.phone } : {}),
+    }).where(and(eq(people.churchId, ctx.church.id), eq(people.id, personId)))
+    if (phoneChanged) {
+      await tx.update(consents).set({ status: 'revoked', revokedAt: new Date(), source: 'phone_changed', updatedAt: new Date() })
+        .where(and(eq(consents.churchId, ctx.church.id), eq(consents.personId, personId), eq(consents.status, 'granted')))
+      await tx.update(authTokens).set({ revokedAt: new Date() })
+        .where(and(eq(authTokens.churchId, ctx.church.id), eq(authTokens.personId, personId), sql`${authTokens.usedAt} is null and ${authTokens.revokedAt} is null`))
+    }
+    await audit(tx, {
+      churchId: ctx.church.id,
+      actorAccountId: ctx.accountId,
+      action: 'person.self_updated',
+      entityType: 'person',
+      entityId: personId,
+      data: { phoneChanged },
+    })
+  })
+  return getMyProfile(db, ctx)
 }
 
 export async function setQualifications(db: Db, ctx: ChurchContext, personId: string, dutyIds: string[]) {
@@ -230,6 +267,7 @@ export async function getMyProfile(db: Db, ctx: ChurchContext) {
     id: person.id,
     displayName: person.displayName,
     phoneMasked: maskPhone(person.phoneE164),
+    phone: person.phoneE164,
     roles: person.roles,
     consent: consent ? { status: consent.status, updatedAt: consent.updatedAt, source: consent.source } : null,
     duties: quals,

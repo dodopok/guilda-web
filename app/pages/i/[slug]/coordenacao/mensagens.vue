@@ -16,20 +16,32 @@ interface Run {
 const { data: out, refresh } = await useAsyncData(`outbox-${route.params.slug}`, () => capi<{ counts: Record<string, number>, messages: MessageRow[] }>('/messages?limit=200'))
 const { data: rem } = await useAsyncData(`reminders-${route.params.slug}`, () => capi<{ runs: Run[] }>('/reminders'))
 
-const filter = computed({
-  get: () => (typeof route.query.estado === 'string' && route.query.estado in MESSAGE_TINT ? route.query.estado : 'todas'),
+const filter = computed<string>({
+  get: () => {
+    const state = route.query.estado
+    if (state === 'problems' || state === 'delivered' || state === 'queued') return state
+    return problemCount.value ? 'problems' : 'todas'
+  },
   set: (v: string) => router.replace({ query: v === 'todas' ? {} : { estado: v } }),
 })
 const rows = computed(() => (out.value?.messages ?? []).map((m) => ({ ...m, tint: messageTint(m.status) })))
+const RETRY = ['blocked', 'failed', 'unknown']
+const problemCount = computed(() => rows.value.filter((m) => RETRY.includes(m.status)).length)
 const filters = computed(() => [
+  { key: 'problems', label: 'Não saíram', n: problemCount.value },
+  { key: 'queued', label: 'Na fila', n: rows.value.filter((r) => ['queued', 'sending'].includes(r.status)).length },
+  { key: 'delivered', label: 'Entregues', n: rows.value.filter((r) => ['sent', 'delivered', 'read'].includes(r.status)).length },
   { key: 'todas', label: 'Todas', n: rows.value.length },
-  ...Object.entries(MESSAGE_TINT).map(([key, t]) => ({ key, label: t.label, n: rows.value.filter((r) => r.tint.key === key).length })),
 ])
-const list = computed(() => (filter.value === 'todas' ? rows.value : rows.value.filter((r) => r.tint.key === filter.value)))
+const list = computed(() => {
+  if (filter.value === 'problems') return rows.value.filter((r) => RETRY.includes(r.status))
+  if (filter.value === 'queued') return rows.value.filter((r) => ['queued', 'sending'].includes(r.status))
+  if (filter.value === 'delivered') return rows.value.filter((r) => ['sent', 'delivered', 'read'].includes(r.status))
+  return rows.value
+})
 
 // Só volta à fila o que não chegou (ou pode não ter chegado); reenviar o que já foi
 // entregue duplicaria a mensagem.
-const RETRY = ['blocked', 'failed', 'unknown']
 async function retry(m: MessageRow) {
   try {
     await capi(`/messages/${m.id}/resend`, { method: 'POST' })
@@ -41,7 +53,6 @@ async function retry(m: MessageRow) {
 }
 
 const sim = ref<{ m: MessageRow, body: string, link: string | null } | null>(null)
-const simOpen = computed({ get: () => sim.value !== null, set: (v) => { if (!v) sim.value = null } })
 async function openSim(m: MessageRow) {
   try {
     const { body } = await capi<{ body: string }>(`/messages/${m.id}/simulated`)
@@ -49,6 +60,19 @@ async function openSim(m: MessageRow) {
   } catch (e) {
     toast.error(e)
   }
+}
+const selectedId = ref<string | null>(null)
+const selected = computed(() => list.value.find((m) => m.id === selectedId.value) ?? list.value[0] ?? null)
+watch(list, (items) => {
+  if (!items.some((m) => m.id === selectedId.value)) selectedId.value = items[0]?.id ?? null
+  const current = items.find((m) => m.id === selectedId.value)
+  if (current?.status !== 'simulated') sim.value = null
+  else if (current && sim.value?.m.id !== current.id) void openSim(current)
+}, { immediate: true })
+function selectMessage(m: MessageRow) {
+  selectedId.value = m.id
+  if (m.status === 'simulated') void openSim(m)
+  else sim.value = null
 }
 
 const reminderLine = computed(() => {
@@ -86,6 +110,12 @@ const runs = computed(() => (rem.value?.runs ?? []).map((r) => {
       <strong>Modo de simulação.</strong> Nada saiu de verdade: cada mensagem fica aqui para você conferir.
       <NuxtLink :to="link('/coordenacao/whatsapp')">Canal do WhatsApp</NuxtLink>
     </div>
+    <div
+      v-if="problemCount"
+      class="panel panel--soft messages-problem-hint"
+    >
+      {{ plural(problemCount, 'mensagem depende', 'mensagens dependem') }} de um cadastro ou nova tentativa. Resolva o motivo e ela volta à fila.
+    </div>
 
     <div
       class="chips"
@@ -104,154 +134,198 @@ const runs = computed(() => (rem.value?.runs ?? []).map((r) => {
       </button>
     </div>
 
-    <div class="card card--flush rows">
-      <div
-        v-for="m in list"
-        :key="m.id"
-        class="rowline"
-      >
-        <span
-          class="av"
-          style="width:40px;height:40px"
-          aria-hidden="true"
-        >{{ initials(m.personName ?? '?') }}</span>
-        <span style="flex:1;min-width:180px">
-          <span
-            class="row"
-            style="gap:8px"
-          >
-            <span class="strong">{{ m.personName ?? 'Sem pessoa' }}</span>
-            <span
-              class="stag"
-              :style="{ background: m.tint.bg, color: m.tint.fg }"
-            >{{ m.tint.label }}</span>
-          </span>
-          <span
-            class="soft"
-            style="display:block;font-size:13.5px"
-          >{{ m.kindLabel }} · {{ stamp(m.createdAt, tz) }}</span>
-          <span
-            v-if="m.blockedReasonText || m.lastError"
-            class="amber"
-            style="display:block;font-size:13.5px;margin-top:2px"
-          >{{ m.blockedReasonText ?? m.lastError }}</span>
-        </span>
-        <span
-          class="row"
-          style="gap:6px"
+    <div class="messages-layout">
+      <div class="card card--flush rows messages-list">
+        <div
+          v-for="m in list"
+          :key="m.id"
+          class="rowline messages-row"
+          :class="{ 'messages-row--selected': selected?.id === m.id }"
+          role="button"
+          tabindex="0"
+          :aria-current="selected?.id === m.id ? 'true' : undefined"
+          @click="selectMessage(m)"
+          @keydown.enter.prevent="selectMessage(m)"
+          @keydown.space.prevent="selectMessage(m)"
         >
+          <span
+            class="av"
+            style="width:40px;height:40px"
+            aria-hidden="true"
+          >{{ initials(m.personName ?? '?') }}</span>
+          <span class="messages-row__copy">
+            <span class="messages-row__top">
+              <span class="strong">{{ m.personName ?? 'Sem pessoa' }}</span>
+              <span
+                class="stag"
+                :style="{ background: m.tint.bg, color: m.tint.fg }"
+              >{{ m.tint.label }}</span>
+            </span>
+            <span class="soft messages-row__sub">{{ m.kindLabel }} · {{ stamp(m.createdAt, tz) }}</span>
+            <span
+              v-if="m.blockedReasonText || m.lastError"
+              class="amber messages-row__reason"
+            >{{ m.blockedReasonText ?? m.lastError }}</span>
+          </span>
           <button
             v-if="RETRY.includes(m.status)"
             type="button"
-            class="btn btn--line btn--xs"
-            @click="retry(m)"
+            class="btn btn--line btn--xs messages-row__action"
+            @click.stop="retry(m)"
           >
             Tentar de novo
           </button>
           <button
-            v-if="m.status === 'simulated'"
+            v-else-if="m.status === 'simulated'"
             type="button"
-            class="link"
-            style="font-size:13.5px"
-            @click="openSim(m)"
+            class="link messages-row__action"
+            @click.stop="selectMessage(m)"
           >
-            Ver mensagem simulada
+            Ver mensagem
           </button>
-        </span>
-      </div>
-      <p
-        v-if="!list.length"
-        class="muted"
-        style="padding:22px 16px;text-align:center"
-      >
-        {{ rows.length ? 'Nenhuma mensagem com esse status.' : 'Nenhuma mensagem ainda.' }}
-      </p>
-    </div>
-
-    <div class="card">
-      <h2 style="font-size:18px">
-        Lembretes semanais
-      </h2>
-      <p
-        class="soft"
-        style="margin:2px 0 8px;font-size:14px"
-      >
-        {{ reminderLine }}
-      </p>
-      <div
-        v-for="r in runs"
-        :key="r.id"
-        class="row"
-        style="gap:10px;padding:10px 0;border-top:1px solid var(--line-2)"
-      >
-        <span
-          class="strong"
-          style="min-width:140px;font-weight:700"
-        >{{ r.when }}</span>
-        <span
-          class="soft"
-          style="flex:1;min-width:160px;font-size:14px"
-        >{{ r.summary }}</span>
-        <span
-          class="stag"
-          :style="r.sim ? { background: '#efe6fb', color: '#5b3aa6' } : { background: '#e3f3e8', color: '#155f30' }"
-        >{{ r.tag }}</span>
-      </div>
-      <p
-        v-if="!runs.length"
-        class="muted small"
-        style="padding-top:6px"
-      >
-        Nenhum lembrete saiu ainda.
-      </p>
-    </div>
-
-    <Sheet
-      v-model:open="simOpen"
-      label="Mensagem simulada"
-    >
-      <template
-        v-if="sim"
-        #head
-      >
-        <p class="caps">
-          Mensagem simulada
-        </p>
-        <h2
-          class="sheet__title"
-          style="margin-top:2px"
-        >
-          Para {{ sim.m.personName ?? 'sem pessoa' }}
-        </h2>
-        <p class="sheet__lede">
-          {{ sim.m.kindLabel }} · {{ stamp(sim.m.createdAt, tz) }} · nada saiu de verdade
-        </p>
-      </template>
-      <template v-if="sim">
-        <div
-          class="bubble"
-          style="background:#e7f6e4;border-radius:18px 18px 18px 4px;font-size:15.5px;max-width:none;white-space:pre-line;word-break:break-word"
-        >
-          {{ sim.body }}
         </div>
-        <div
-          v-if="sim.link"
-          class="row"
-          style="margin-top:12px;gap:8px;background:var(--surface-2);border-radius:12px;padding:10px 12px"
+        <p
+          v-if="!list.length"
+          class="muted"
+          style="padding:22px 16px;text-align:center"
         >
-          <span
+          {{ rows.length ? 'Nenhuma mensagem com esse filtro.' : 'Nenhuma mensagem ainda.' }}
+        </p>
+      </div>
+
+      <aside class="messages-aside">
+        <div
+          v-if="selected"
+          class="card messages-detail"
+        >
+          <p class="caps">
+            Detalhe
+          </p>
+          <div
+            class="row"
+            style="gap:10px;margin-top:10px"
+          >
+            <span
+              class="av"
+              aria-hidden="true"
+            >{{ initials(selected.personName ?? '?') }}</span>
+            <span class="grow"><strong>{{ selected.personName ?? 'Sem pessoa' }}</strong><span class="messages-detail__sub">{{ selected.kindLabel }} · {{ stamp(selected.createdAt, tz) }}</span></span>
+            <span
+              class="stag"
+              :style="{ background: selected.tint.bg, color: selected.tint.fg }"
+            >{{ selected.tint.label }}</span>
+          </div>
+          <div
+            v-if="selected.blockedReasonText || selected.lastError"
+            class="panel panel--wait messages-detail__reason"
+          >
+            <strong>Por que não saiu</strong>
+            <p style="margin-top:3px">
+              {{ selected.blockedReasonText ?? selected.lastError }}
+            </p>
+          </div>
+          <div
+            v-if="RETRY.includes(selected.status)"
+            class="row messages-detail__actions"
+          >
+            <button
+              type="button"
+              class="btn btn--sm"
+              @click="retry(selected)"
+            >
+              Tentar de novo
+            </button>
+            <NuxtLink
+              v-if="selected.personId"
+              :to="link('/coordenacao/pessoas')"
+              class="link"
+            >Abrir pessoas</NuxtLink>
+          </div>
+          <template v-if="selected.status === 'simulated'">
+            <p
+              class="caps"
+              style="margin-top:16px"
+            >
+              O que seria enviado
+            </p>
+            <p
+              v-if="sim?.m.id === selected.id"
+              class="bubble messages-detail__bubble"
+            >
+              {{ sim.body }}
+            </p>
+            <button
+              v-else
+              type="button"
+              class="btn btn--secondary btn--sm"
+              style="margin-top:8px"
+              @click="openSim(selected)"
+            >
+              Ver mensagem simulada
+            </button>
+            <a
+              v-if="sim?.m.id === selected.id && sim.link"
+              :href="sim.link"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="messages-detail__url"
+            >{{ sim.link }}</a>
+          </template>
+          <template v-else-if="selected.preview">
+            <p
+              class="caps"
+              style="margin-top:16px"
+            >
+              Prévia
+            </p>
+            <p class="messages-detail__preview">
+              {{ selected.preview }}
+            </p>
+          </template>
+          <div class="messages-timeline">
+            <p><span>Criada</span><strong>{{ stamp(selected.createdAt, tz) }}</strong></p>
+            <p v-if="selected.sentAt">
+              <span>Enviada</span><strong>{{ stamp(selected.sentAt, tz) }}</strong>
+            </p>
+            <p v-if="selected.deliveredAt">
+              <span>Entregue</span><strong>{{ stamp(selected.deliveredAt, tz) }}</strong>
+            </p>
+            <p v-if="selected.readAt">
+              <span>Lida</span><strong>{{ stamp(selected.readAt, tz) }}</strong>
+            </p>
+          </div>
+        </div>
+
+        <div class="card messages-reminders">
+          <h2 style="font-size:18px">
+            Lembrete semanal
+          </h2>
+          <p
             class="soft"
-            style="font-size:13.5px"
-          >Link dentro da mensagem</span>
-          <a
-            :href="sim.link"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="strong"
-            style="color:var(--accent-deep);word-break:break-all"
-          >{{ sim.link }}</a>
+            style="margin:2px 0 8px;font-size:14px"
+          >
+            {{ reminderLine }}
+          </p>
+          <div
+            v-for="r in runs"
+            :key="r.id"
+            class="messages-run"
+          >
+            <span><strong>{{ r.when }}</strong><small>{{ r.summary }}</small></span>
+            <span
+              class="stag"
+              :style="r.sim ? { background: '#efe6fb', color: '#5b3aa6' } : { background: '#e3f3e8', color: '#155f30' }"
+            >{{ r.tag }}</span>
+          </div>
+          <p
+            v-if="!runs.length"
+            class="muted small"
+            style="padding-top:6px"
+          >
+            Nenhum lembrete saiu ainda.
+          </p>
         </div>
-      </template>
-    </Sheet>
+      </aside>
+    </div>
   </div>
 </template>

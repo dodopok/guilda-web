@@ -18,6 +18,13 @@ onMounted(() => {
   brand.value = readRememberedBrand()
   remembered.value = readRememberedLogin()
 })
+watch(usingRemembered, async (isRemembered) => {
+  if (!isRemembered) return
+  await nextTick()
+  if (window.matchMedia('(min-width: 900px)').matches) {
+    document.querySelector<HTMLInputElement>('input[autocomplete="current-password"]')?.focus()
+  }
+}, { flush: 'post' })
 useHead(() => ({ htmlAttrs: { style: accentStyle(brand.value?.accent) } }))
 
 function useAnotherAccount() {

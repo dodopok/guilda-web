@@ -21,10 +21,12 @@ const groups = computed(() => (data.value?.ministries ?? []).map((m) => ({ m, du
 
 // ------------------------------------------------------------ pessoas
 const search = ref('')
-type FilterKey = 'todas' | 'coordenacao' | 'pastores' | 'sem-acesso' | 'sem-whatsapp' | 'sem-funcao' | 'inativas'
+type FilterKey = 'todas' | 'coordenacao' | 'pastores' | 'sem-acesso' | 'sem-whatsapp' | 'sem-funcao' | 'inativas' | `duty:${string}`
 const filter = ref<FilterKey>('todas')
 const hasWa = (p: PersonAdmin) => Boolean(p.phone) && p.consent?.status === 'granted'
 const activePeople = computed(() => (data.value?.people ?? []).filter((p) => p.status === 'active'))
+const notEntered = computed(() => activePeople.value.filter((p) => !p.hasAccount))
+const inviteReady = computed(() => notEntered.value.filter((p) => Boolean(p.phone) && p.consent?.status === 'granted'))
 const filters = computed(() => {
   const list: { key: FilterKey, label: string, n: number }[] = [
     { key: 'todas' as const, label: 'Todas', n: activePeople.value.length },
@@ -36,44 +38,50 @@ const filters = computed(() => {
   ]
   const inactive = (data.value?.people ?? []).filter((p) => p.status !== 'active').length
   if (inactive) list.push({ key: 'inativas' as const, label: 'Inativas', n: inactive })
+  list.push(...activeDuties.value.map((d) => ({ key: `duty:${d.id}` as FilterKey, label: d.name, n: activePeople.value.filter((p) => p.dutyIds.includes(d.id)).length })))
   return list
 })
 const list = computed(() => {
   const q = search.value.trim().toLowerCase()
   const base = filter.value === 'inativas' ? (data.value?.people ?? []).filter((p) => p.status !== 'active') : activePeople.value
+  const dutyId = filter.value.startsWith('duty:') ? filter.value.slice(5) : null
   return base.filter((p) => (!q || p.displayName.toLowerCase().includes(q))
     && (filter.value !== 'coordenacao' || p.roles.includes('coordinator'))
     && (filter.value !== 'pastores' || p.roles.includes('pastor'))
     && (filter.value !== 'sem-acesso' || !p.hasAccount)
     && (filter.value !== 'sem-whatsapp' || !hasWa(p))
-    && (filter.value !== 'sem-funcao' || !p.dutyIds.length))
+    && (filter.value !== 'sem-funcao' || !p.dutyIds.length)
+    && (!dutyId || p.dutyIds.includes(dutyId)))
 })
 const roleTag = (p: PersonAdmin) => roleTags(p.roles).join(' · ')
 const dutiesLine = (p: PersonAdmin) => {
   const names = p.dutyIds.map(dutyName).filter(Boolean)
   return names.length ? names.slice(0, 3).join(' · ') + (names.length > 3 ? ` · +${names.length - 3}` : '') : 'Sem função marcada'
 }
-const accText = (p: PersonAdmin) => (p.hasAccount ? 'tem acesso' : p.invite?.state === 'pending' ? 'convite enviado' : p.invite?.state === 'expired' ? 'convite expirou' : 'sem convite')
-const waText = (p: PersonAdmin) => (!p.phone ? 'sem telefone' : hasWa(p) ? 'WhatsApp ok' : 'sem WhatsApp')
-
+function personStatusLine(p: PersonAdmin) {
+  if (!p.phone) return 'Sem celular cadastrado'
+  if (p.consent?.status !== 'granted') return p.invite?.state === 'pending' && !p.hasAccount ? 'Convite enviado · ainda sem autorização do WhatsApp' : 'Ainda não autorizou o WhatsApp'
+  if (p.hasAccount) return dutiesLine(p)
+  if (p.invite?.state === 'pending') return 'Convite enviado · vale por 72 horas'
+  if (p.invite?.state === 'expired') return 'Convite expirou'
+  return 'Sem convite · WhatsApp autorizado'
+}
+function canInvite(p: PersonAdmin) {
+  return !p.hasAccount && Boolean(p.phone) && p.consent?.status === 'granted'
+}
 // Folha da pessoa
 const personId = ref<string | null>(null)
 const person = computed(() => data.value?.people.find((p) => p.id === personId.value) ?? null)
 const personOpen = computed({ get: () => Boolean(personId.value), set: (v) => { if (!v) personId.value = null } })
 const personDuties = ref<Set<string>>(new Set())
 const edit = reactive({ displayName: '', phone: '', roles: ['participant'] as string[], restExempt: false })
+const savingPerson = ref(false)
 function openPerson(id: string) {
   personId.value = id
   const p = data.value?.people.find((x) => x.id === id)
   personDuties.value = new Set(p?.dutyIds ?? [])
   Object.assign(edit, { displayName: p?.displayName ?? '', phone: p?.phone ?? '', roles: [...(p?.roles ?? ['participant'])], restExempt: p?.restExempt ?? false })
   lastInvite.value = null
-}
-function toggleDuty(id: string) {
-  const s = new Set(personDuties.value)
-  if (s.has(id)) s.delete(id)
-  else s.add(id)
-  personDuties.value = s
 }
 async function setConsent(on: boolean) {
   const p = person.value
@@ -87,9 +95,7 @@ async function setConsent(on: boolean) {
   }
 }
 const lastInvite = ref<{ messageId: string, status: string, blockedReason: string | null } | null>(null)
-async function invite() {
-  const p = person.value
-  if (!p) return
+async function sendInvite(p: PersonAdmin) {
   try {
     const r = await capi<{ messageId: string, messageStatus: string, blockedReason: string | null }>(`/people/${p.id}/invite`, { method: 'POST' })
     lastInvite.value = { messageId: r.messageId, status: r.messageStatus, blockedReason: r.blockedReason }
@@ -98,6 +104,38 @@ async function invite() {
     await refresh()
   } catch (e) {
     toast.error(e)
+  }
+}
+async function invite() {
+  const p = person.value
+  if (!p) return
+  if (!p.phone) {
+    toast.error('Cadastre o celular antes de enviar o convite.')
+    return
+  }
+  if (p.consent?.status !== 'granted') {
+    toast.error('Registre a autorização para receber WhatsApp antes de enviar o convite.')
+    return
+  }
+  await sendInvite(p)
+}
+const bulkInviteBusy = ref(false)
+async function inviteEveryoneReady() {
+  if (!inviteReady.value.length) return
+  bulkInviteBusy.value = true
+  let sent = 0
+  try {
+    for (const p of inviteReady.value) {
+      await capi(`/people/${p.id}/invite`, { method: 'POST' })
+      sent++
+    }
+    toast.ok(`Convite enviado para ${plural(sent, 'pessoa', 'pessoas')}.`)
+    await refresh()
+  } catch (e) {
+    await refresh()
+    toast.error(e, sent ? `${sent} convites enviados; revise as pendências restantes.` : undefined)
+  } finally {
+    bulkInviteBusy.value = false
   }
 }
 const simulated = ref<string | null>(null)
@@ -111,7 +149,8 @@ async function showSimulated() {
 }
 async function savePerson() {
   const p = person.value
-  if (!p) return
+  if (!p || savingPerson.value) return
+  savingPerson.value = true
   try {
     const roles = [...new Set(['participant', ...edit.roles])]
     const changes: Record<string, unknown> = {}
@@ -120,11 +159,25 @@ async function savePerson() {
     if (roles.sort().join() !== [...p.roles].sort().join()) changes.roles = roles
     if (edit.restExempt !== p.restExempt) changes.restExempt = edit.restExempt
     if (Object.keys(changes).length) await capi(`/people/${p.id}`, { method: 'PATCH', body: changes })
-    await capi(`/people/${p.id}/qualifications`, { method: 'PUT', body: { dutyIds: [...personDuties.value] } })
     toast.ok('Alterações salvas.')
     personId.value = null
     await refresh()
   } catch (e) {
+    toast.error(e)
+  } finally {
+    savingPerson.value = false
+  }
+}
+async function saveRoles() {
+  const p = person.value
+  if (!p) return
+  const roles = [...new Set(['participant', ...edit.roles])]
+  if (roles.slice().sort().join() === [...p.roles].sort().join()) return
+  try {
+    await capi(`/people/${p.id}`, { method: 'PATCH', body: { roles } })
+    await refresh()
+  } catch (e) {
+    edit.roles = [...p.roles]
     toast.error(e)
   }
 }
@@ -171,12 +224,30 @@ function openDuty(id: string) {
   const d = data.value?.duties.find((x) => x.id === id)
   Object.assign(dform, { name: d?.name ?? '', instructions: d?.instructions ?? '', required: d?.defaultRequiredCount ?? 1, arrival: d?.arrivalMinutesBefore ?? '', musicNotice: d?.receivesMusicNotice ?? false, inScript: d?.inScript ?? true })
 }
-const qualified = computed(() => (data.value?.people ?? []).filter((p) => p.status === 'active' && dutyId.value && p.dutyIds.includes(dutyId.value)))
+const qualificationBusy = ref<string | null>(null)
+async function togglePersonQualification(p: PersonAdmin) {
+  const id = duty.value?.id
+  if (!id || qualificationBusy.value) return
+  const before = [...p.dutyIds]
+  const next = before.includes(id) ? before.filter((d) => d !== id) : [...before, id]
+  p.dutyIds = next
+  qualificationBusy.value = p.id
+  try {
+    await capi(`/people/${p.id}/qualifications`, { method: 'PUT', body: { dutyIds: next } })
+    await refresh()
+  } catch (e) {
+    p.dutyIds = before
+    toast.error(e)
+  } finally {
+    qualificationBusy.value = null
+  }
+}
 const ministryName = (id: string) => data.value?.ministries.find((m) => m.id === id)?.name ?? ''
 const dutySub = (d: Duty) => {
   const n = activePeople.value.filter((p) => p.dutyIds.includes(d.id)).length
-  return `${plural(d.defaultRequiredCount, 'pessoa', 'pessoas')} · ${d.arrivalMinutesBefore ? `chega ${d.arrivalMinutesBefore} min antes` : 'horário a combinar'} · ${plural(n, 'habilitado', 'habilitados')}`
+  return `${plural(d.defaultRequiredCount, 'pessoa', 'pessoas')} por culto · ${d.arrivalMinutesBefore ? `chega ${d.arrivalMinutesBefore} min antes` : 'horário a combinar'} · ${plural(n, 'habilitado', 'habilitados')}`
 }
+const lowPeopleDuties = computed(() => activeDuties.value.filter((d) => activePeople.value.filter((p) => p.dutyIds.includes(d.id)).length <= 2))
 async function saveDuty() {
   const d = duty.value
   if (!d) return
@@ -240,6 +311,34 @@ async function saveNewDuty() {
   }
 }
 const dataOpen = ref(false)
+const personDataDirty = computed(() => {
+  const p = person.value
+  return Boolean(p && (
+    edit.displayName.trim() !== p.displayName
+    || normalizePhoneBR(edit.phone) !== (p.phone ?? null)
+    || edit.restExempt !== p.restExempt
+  ))
+})
+const dutySaving = ref(false)
+async function toggleDuty(id: string) {
+  const p = person.value
+  if (!p || dutySaving.value) return
+  const before = new Set(personDuties.value)
+  const next = new Set(before)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  personDuties.value = next
+  dutySaving.value = true
+  try {
+    await capi(`/people/${p.id}/qualifications`, { method: 'PUT', body: { dutyIds: [...next] } })
+    await refresh()
+  } catch (e) {
+    personDuties.value = before
+    toast.error(e)
+  } finally {
+    dutySaving.value = false
+  }
+}
 watch(personId, () => (dataOpen.value = false))
 </script>
 
@@ -261,8 +360,19 @@ watch(personId, () => (dataOpen.value = false))
           class="h1--sm"
           style="margin-top:6px"
         >
-          Pessoas e funções
+          {{ tab === 'pessoas' ? 'Pessoas' : 'Funções' }}
         </h1>
+        <p
+          class="soft small"
+          style="margin-top:3px"
+        >
+          <template v-if="tab === 'pessoas'">
+            {{ activePeople.length }} ativas · {{ activeDuties.length }} funções
+          </template>
+          <template v-else>
+            {{ activeDuties.length }} funções · {{ data.ministries.length }} ministérios · {{ lowPeopleDuties.length }} com pouca gente
+          </template>
+        </p>
       </div>
       <div
         class="seg seg--white seg--dark"
@@ -289,6 +399,29 @@ watch(personId, () => (dataOpen.value = false))
       </div>
     </div>
 
+    <div
+      v-if="tab === 'pessoas' && notEntered.length"
+      class="people-invite-summary"
+    >
+      <span class="grow">
+        <strong>{{ notEntered.length }} ainda não entraram no app</strong>
+        <small>{{ notEntered.slice(0, 3).map((p) => p.displayName.split(' ')[0]).join(', ') }}<template v-if="notEntered.length > 3"> e mais {{ notEntered.length - 3 }}</template></small>
+      </span>
+      <button
+        v-if="inviteReady.length"
+        type="button"
+        class="btn btn--soft btn--sm"
+        :disabled="bulkInviteBusy"
+        @click="inviteEveryoneReady"
+      >
+        {{ bulkInviteBusy ? 'Enviando…' : inviteReady.length === notEntered.length ? (inviteReady.length === 1 ? 'Convidar 1 pessoa' : `Convidar as ${inviteReady.length}`) : `Convidar ${inviteReady.length}` }}
+      </button>
+      <span
+        v-else
+        class="small muted"
+      >Resolva celular e autorização na própria pessoa.</span>
+    </div>
+
     <template v-if="tab === 'pessoas'">
       <div class="row">
         <input
@@ -309,11 +442,12 @@ watch(personId, () => (dataOpen.value = false))
             name="plus"
             :weight="2.2"
             style="width:18px;height:18px"
-          />Nova pessoa
+          />Nova
         </button>
       </div>
       <div
         class="chips"
+        :class="{ 'people-filter-chips': filters.length > 6 }"
         role="group"
         aria-label="Filtro"
       >
@@ -329,42 +463,62 @@ watch(personId, () => (dataOpen.value = false))
         </button>
       </div>
       <div class="card card--flush list">
-        <button
+        <div
           v-for="p in list"
           :key="p.id"
-          type="button"
-          class="listrow"
-          @click="openPerson(p.id)"
+          class="person-admin-row"
         >
-          <span class="av av--lg">{{ initials(p.displayName) }}</span>
-          <span class="grow">
-            <span
-              class="row"
-              style="gap:8px"
-            ><span style="font-weight:800;font-size:16px">{{ p.displayName }}</span><span
-              v-if="roleTag(p)"
-              class="tag"
-            >{{ roleTag(p) }}</span><span
-              v-if="p.status !== 'active'"
-              class="tag tag--no"
-            >inativa</span></span>
-            <span
-              class="soft"
-              style="display:block;font-size:13.5px;margin-top:1px"
-            >{{ dutiesLine(p) }}</span>
-          </span>
-          <span
-            style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:12.5px;font-weight:700;white-space:nowrap"
+          <button
+            type="button"
+            class="person-admin-row__main"
+            @click="openPerson(p.id)"
           >
-            <span :style="{ color: p.hasAccount ? 'var(--ok)' : 'var(--muted)' }">{{ accText(p) }}</span>
-            <span :style="{ color: hasWa(p) ? 'var(--ok)' : 'var(--wait)' }">{{ waText(p) }}</span>
-          </span>
-          <Icon
-            name="chevron-right"
-            :weight="2"
-            class="listrow__chev"
-          />
-        </button>
+            <span class="av av--lg">{{ initials(p.displayName) }}</span>
+            <span class="grow">
+              <span
+                class="row"
+                style="gap:8px"
+              ><span style="font-weight:800;font-size:16px">{{ p.displayName }}</span><span
+                v-if="roleTag(p)"
+                class="tag"
+              >{{ roleTag(p) }}</span><span
+                v-if="p.status !== 'active'"
+                class="tag tag--no"
+              >inativa</span></span>
+              <span
+                class="soft person-admin-row__status"
+                :class="{ 'person-admin-row__status--wait': !p.phone || p.consent?.status !== 'granted' }"
+              >{{ personStatusLine(p) }}</span>
+            </span>
+            <Icon
+              name="chevron-right"
+              :weight="2"
+              class="listrow__chev"
+            />
+          </button>
+          <div
+            v-if="!p.hasAccount || !hasWa(p)"
+            class="person-admin-row__action"
+          >
+            <button
+              v-if="canInvite(p)"
+              type="button"
+              class="btn btn--soft btn--xs"
+              :disabled="bulkInviteBusy"
+              @click="sendInvite(p)"
+            >
+              {{ p.invite?.state === 'pending' ? 'Reenviar' : 'Convidar' }}
+            </button>
+            <button
+              v-else
+              type="button"
+              class="link"
+              @click="openPerson(p.id)"
+            >
+              {{ !p.phone ? 'Adicionar celular' : p.consent?.status !== 'granted' ? 'Registrar autorização' : 'Resolver' }}
+            </button>
+          </div>
+        </div>
         <p
           v-if="!list.length"
           class="soft"
@@ -394,43 +548,58 @@ watch(personId, () => (dataOpen.value = false))
         </button>
       </div>
       <div
-        v-for="g in groups"
-        :key="g.m.id"
-        class="card card--flush"
+        v-if="lowPeopleDuties.length"
+        class="people-low-duty-note"
       >
-        <p
-          class="caps"
-          style="padding:12px 16px 8px"
+        <strong>{{ lowPeopleDuties.length }} {{ lowPeopleDuties.length === 1 ? 'função com pouca gente' : 'funções com pouca gente' }}</strong>
+        <span>{{ lowPeopleDuties.map((d) => `${d.name} (${activePeople.filter((p) => p.dutyIds.includes(d.id)).length})`).join(' · ') }} — fica difícil revezar</span>
+      </div>
+      <div class="people-function-grid">
+        <div
+          v-for="g in groups"
+          :key="g.m.id"
+          class="card card--flush"
         >
-          {{ g.m.name }}
-        </p>
-        <button
-          v-for="d in g.duties"
-          :key="d.id"
-          type="button"
-          class="listrow"
-          style="border-top:1px solid var(--line-2)"
-          @click="openDuty(d.id)"
-        >
-          <span class="grow"><span
-            class="strong"
-            style="display:block"
-          >{{ d.name }}</span><span
-            class="soft"
-            style="display:block;font-size:13.5px"
-          >{{ dutySub(d) }}</span></span>
-          <Icon
-            name="chevron-right"
-            :weight="2"
-            class="listrow__chev"
-          />
-        </button>
+          <p
+            class="caps"
+            style="padding:12px 16px 8px"
+          >
+            {{ g.m.name }}
+          </p>
+          <button
+            v-for="d in g.duties"
+            :key="d.id"
+            type="button"
+            class="listrow"
+            style="border-top:1px solid var(--line-2)"
+            @click="openDuty(d.id)"
+          >
+            <span class="grow"><span
+              class="strong"
+              style="display:block"
+            >{{ d.name }}</span><span
+              class="soft"
+              style="display:block;font-size:13.5px"
+            >{{ dutySub(d) }}</span></span>
+            <span
+              v-if="activePeople.filter((p) => p.dutyIds.includes(d.id)).length <= 2"
+              class="tag tag--wait"
+            >pouca gente</span>
+            <Icon
+              name="chevron-right"
+              :weight="2"
+              class="listrow__chev"
+            />
+          </button>
+        </div>
       </div>
     </template>
 
     <!-- Pessoa -->
     <Sheet
       v-model:open="personOpen"
+      placement="right"
+      panel
       :label="person?.displayName"
     >
       <template
@@ -455,7 +624,10 @@ watch(personId, () => (dataOpen.value = false))
       <template v-if="person">
         <div style="margin-top:14px">
           <span class="field__label">Papel na igreja</span>
-          <RolePicker v-model="edit.roles" />
+          <RolePicker
+            v-model="edit.roles"
+            @update:model-value="saveRoles"
+          />
           <p
             class="small muted"
             style="margin-top:6px"
@@ -511,6 +683,15 @@ watch(personId, () => (dataOpen.value = false))
               boxed
             />
             <button
+              v-if="personDataDirty"
+              type="button"
+              class="btn btn--block"
+              :disabled="savingPerson"
+              @click="savePerson"
+            >
+              {{ savingPerson ? 'Salvando…' : 'Salvar dados' }}
+            </button>
+            <button
               type="button"
               class="link"
               style="align-self:flex-start"
@@ -562,12 +743,18 @@ watch(personId, () => (dataOpen.value = false))
             <button
               type="button"
               class="btn btn--soft btn--sm"
-              :disabled="!person.phone"
+              :disabled="!canInvite(person)"
               @click="invite"
             >
-              {{ person.invite?.state === 'pending' ? 'Reenviar convite' : 'Enviar convite pelo WhatsApp' }}
+              {{ !person.phone ? 'Cadastre o celular primeiro' : person.consent?.status !== 'granted' ? 'Aguardando autorização' : person.invite?.state === 'pending' ? 'Reenviar convite' : 'Enviar convite pelo WhatsApp' }}
             </button>
           </div>
+          <p
+            v-if="!person.hasAccount && person.phone && person.consent?.status !== 'granted'"
+            class="small soft"
+          >
+            Primeiro registre a autorização para receber WhatsApp; depois o convite pode ser enviado.
+          </p>
           <p
             v-if="lastInvite && info?.whatsappMode === 'simulation' && lastInvite.status !== 'blocked'"
             class="small"
@@ -613,6 +800,7 @@ watch(personId, () => (dataOpen.value = false))
                 type="button"
                 class="chip"
                 :aria-pressed="personDuties.has(d.id)"
+                :disabled="dutySaving"
                 @click="toggleDuty(d.id)"
               >
                 <Icon
@@ -624,14 +812,6 @@ watch(personId, () => (dataOpen.value = false))
             </div>
           </div>
         </div>
-        <button
-          type="button"
-          class="btn btn--block"
-          style="margin-top:18px;min-height:50px"
-          @click="savePerson"
-        >
-          Salvar
-        </button>
       </template>
     </Sheet>
 
@@ -666,6 +846,7 @@ watch(personId, () => (dataOpen.value = false))
     <Sheet
       v-model:open="dutyOpen"
       placement="right"
+      panel
       :label="duty?.name"
     >
       <template
@@ -739,16 +920,32 @@ watch(personId, () => (dataOpen.value = false))
           >
             Quem pode fazer
           </p>
+          <p
+            class="small muted"
+            style="margin-bottom:8px"
+          >
+            Toque nos nomes para marcar quem está habilitado nesta função.
+          </p>
           <div class="chips">
-            <span
-              v-for="p in qualified"
+            <button
+              v-for="p in activePeople"
               :key="p.id"
-              class="person-tag"
-            ><span class="av av--sm">{{ initials(p.displayName) }}</span>{{ p.displayName }}</span>
+              type="button"
+              class="chip"
+              :aria-pressed="p.dutyIds.includes(duty.id)"
+              :disabled="qualificationBusy === p.id || Boolean(qualificationBusy)"
+              @click="togglePersonQualification(p)"
+            >
+              <Icon
+                v-if="p.dutyIds.includes(duty.id)"
+                name="check"
+                :weight="2.4"
+              />{{ p.displayName }}
+            </button>
             <span
-              v-if="!qualified.length"
+              v-if="!activePeople.length"
               class="soft small"
-            >Ninguém ainda. Marque na aba Pessoas.</span>
+            >Cadastre as pessoas da igreja primeiro.</span>
           </div>
         </div>
         <button class="btn btn--block">

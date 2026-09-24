@@ -4,6 +4,8 @@ import type { Church } from '~/types'
 useHead({ title: 'Configurações' })
 const { capi, link, info, tz, churchName, logoUrl, refreshInfo, slug } = useChurch()
 const toast = useToast()
+const route = useRoute()
+const router = useRouter()
 
 const c = computed(() => info.value!.church)
 const form = reactive({
@@ -102,32 +104,93 @@ const nextReminder = computed(() => {
   return ''
 })
 
-const saving = ref(false)
-async function save() {
-  saving.value = true
+type SettingsSection = 'identity' | 'reminder' | 'liturgy'
+const settingsSection = ref<SettingsSection | null>(null)
+const settingsBaseline = ref<Record<string, unknown>>({})
+const savingSection = ref(false)
+const sectionFields: Record<SettingsSection, string[]> = {
+  identity: ['name', 'defaultLocation', 'timezone', 'accentColor'],
+  reminder: ['reminderEnabled', 'reminderWeekday', 'reminderTime', 'confirmationDeadlineHours'],
+  liturgy: ['liturgicalReadingType', 'liturgicalPrayerBook'],
+}
+function isSettingsSection(value: unknown): value is SettingsSection {
+  return value === 'identity' || value === 'reminder' || value === 'liturgy'
+}
+function valuesFor(section: SettingsSection) {
+  return Object.fromEntries(sectionFields[section]!.map((key) => [key, form[key as keyof typeof form]]))
+}
+function openSection(section: SettingsSection, syncUrl = true) {
+  settingsBaseline.value = valuesFor(section)
+  settingsSection.value = section
+  if (syncUrl && route.query.editar !== section) void router.replace({ query: { ...route.query, editar: section } })
+}
+function clearEditQuery() {
+  if (!route.query.editar) return
+  const query = { ...route.query }
+  delete query.editar
+  void router.replace({ query })
+}
+watch(() => route.query.editar, (value) => {
+  if (isSettingsSection(value) && settingsSection.value !== value) openSection(value, false)
+}, { immediate: true })
+async function closeSection(section: SettingsSection, open: boolean) {
+  if (open) {
+    if (!settingsSection.value) openSection(section)
+    return
+  }
+  if (settingsSection.value !== section || savingSection.value) return
+  await saveSection(section, true)
+}
+async function saveSection(section: SettingsSection, closeWhileSaving: boolean) {
+  const values = valuesFor(section)
+  if (JSON.stringify(values) === JSON.stringify(settingsBaseline.value)) {
+    settingsSection.value = null
+    clearEditQuery()
+    return
+  }
+  if (closeWhileSaving) {
+    settingsSection.value = null
+    clearEditQuery()
+  }
+  savingSection.value = true
   try {
     const r = await capi<{ church: Church }>('', {
       method: 'PATCH',
       body: {
-        name: form.name.trim(),
-        defaultLocation: form.defaultLocation.trim() || null,
-        timezone: form.timezone,
-        reminderEnabled: form.reminderEnabled,
-        reminderWeekday: form.reminderWeekday,
-        reminderTime: form.reminderTime,
-        confirmationDeadlineHours: Math.max(0, Number(form.confirmationDeadlineHours) || 0),
-        liturgicalReadingType: form.liturgicalReadingType,
-        liturgicalPrayerBook: form.liturgicalPrayerBook,
-        accentColor: form.accentColor,
+        ...(section === 'identity'
+          ? {
+              name: form.name.trim(),
+              defaultLocation: form.defaultLocation.trim() || null,
+              timezone: form.timezone,
+              accentColor: form.accentColor,
+            }
+          : {}),
+        ...(section === 'reminder'
+          ? {
+              reminderEnabled: form.reminderEnabled,
+              reminderWeekday: form.reminderWeekday,
+              reminderTime: form.reminderTime,
+              confirmationDeadlineHours: Math.max(0, Number(form.confirmationDeadlineHours) || 0),
+            }
+          : {}),
+        ...(section === 'liturgy'
+          ? {
+              liturgicalReadingType: form.liturgicalReadingType,
+              liturgicalPrayerBook: form.liturgicalPrayerBook,
+            }
+          : {}),
       },
     })
     savedAccent.value = r.church.accentColor
     await refreshInfo()
-    toast.ok('Configurações salvas. A cara da igreja já mudou em todo o app.')
+    toast.ok(section === 'identity' ? 'Identidade da igreja salva.' : 'Configuração salva.')
+    settingsSection.value = null
+    clearEditQuery()
   } catch (e) {
     toast.error(e)
+    settingsSection.value = section
   } finally {
-    saving.value = false
+    savingSection.value = false
   }
 }
 const wa = computed(() => {
@@ -138,12 +201,30 @@ const wa = computed(() => {
 })
 // Contagens dos atalhos: mensagens para revisar e músicas no repertório.
 const { data: toolCounts } = useLazyAsyncData(`tool-counts-${slug.value}`, async () => {
-  const [m, songs] = await Promise.all([
+  const [m, songs, channel] = await Promise.all([
     capi<{ counts: Record<string, number> }>('/messages?limit=1').catch(() => null),
     capi<{ songs: unknown[] }>('/songs').catch(() => null),
+    capi<{ readiness: { hasCredentials: boolean, hasWebhookSecret: boolean, approvedTemplates: string[] }, templates: { status: string }[], coexistence: { status: string }, consents: { people: number, granted: number } }>('/whatsapp').catch(() => null),
   ])
-  return { review: (m?.counts.failed ?? 0) + (m?.counts.unknown ?? 0), songs: songs?.songs.length ?? null }
+  const waSteps = channel
+    ? [
+        channel.readiness.hasCredentials && channel.readiness.hasWebhookSecret,
+        channel.coexistence.status === 'verified',
+        channel.templates.length > 0 && channel.templates.every((template) => template.status === 'approved'),
+        channel.consents.people > 0 && channel.consents.granted === channel.consents.people,
+      ].filter(Boolean).length
+    : null
+  return { review: (m?.counts.failed ?? 0) + (m?.counts.unknown ?? 0), songs: songs?.songs.length ?? null, waSteps }
 })
+const churchAddress = computed(() => import.meta.client ? `${window.location.origin}${link('')}` : link(''))
+async function copyChurchAddress() {
+  try {
+    await navigator.clipboard.writeText(churchAddress.value)
+    toast.ok('Endereço copiado.')
+  } catch {
+    toast.error('Não consegui copiar. Selecione e copie o endereço.')
+  }
+}
 const tools = computed(() => [
   { to: '/coordenacao/mensagens', label: 'Mensagens enviadas', sub: 'Tudo que saiu pelo WhatsApp', icon: 'message', badge: toolCounts.value?.review ? `${toolCounts.value.review} para revisar` : '' },
   { to: '/coordenacao/whatsapp', label: 'Canal do WhatsApp', sub: 'Modo, número e modelos de mensagem', icon: 'send', badge: info.value?.whatsappMode === 'simulation' ? 'simulação' : '' },
@@ -155,7 +236,7 @@ const tools = computed(() => [
 </script>
 
 <template>
-  <section class="stack-md w-760">
+  <section class="stack-lg w-760 settings-page">
     <div>
       <BackLink
         :to="link('/coordenacao')"
@@ -167,309 +248,115 @@ const tools = computed(() => [
       >
         Configurações
       </h1>
-    </div>
-
-    <div class="card card--lg">
-      <h2 class="h3">
-        A cara da sua igreja
-      </h2>
-      <p
-        class="soft"
-        style="margin-top:4px;font-size:15px"
-      >
-        Envie o logo; a gente acha a cor.
+      <p class="lede">
+        Cada item mostra como está agora. Abra para ajustar.
       </p>
-      <div
-        class="row"
-        style="gap:20px;margin-top:18px;align-items:flex-start"
-      >
-        <div
-          class="stack-sm"
-          style="align-items:flex-start"
-        >
-          <label
-            class="logodrop"
-            :class="{ 'logodrop--has': logoUrl }"
-          >
-            <img
-              v-if="logoUrl"
-              :src="logoUrl"
-              :alt="`Logo de ${churchName}`"
-            >
-            <span
-              v-else
-              style="text-align:center;padding:12px"
-            ><Icon
-              name="upload"
-              :weight="2"
-              style="width:26px;height:26px"
-            /><span
-              style="display:block;font-weight:800;font-size:13px;margin-top:4px"
-            >{{ uploading ? 'Enviando…' : 'Enviar logo' }}</span><span
-              style="display:block;font-size:11.5px;opacity:.85"
-            >quadrado, PNG ou JPG</span></span>
-            <input
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-              aria-label="Enviar logo da igreja"
-              :disabled="uploading"
-              @change="onLogo"
-            >
-          </label>
-          <button
-            v-if="logoUrl"
-            type="button"
-            class="link link--muted"
-            @click="removeLogo"
-          >
-            Tirar logo
-          </button>
-        </div>
-        <div
-          class="stack-md"
-          style="flex:1;min-width:240px"
-        >
-          <div>
-            <p
-              class="strong"
-              style="font-size:14.5px;margin-bottom:8px"
-            >
-              Cor da igreja
-            </p>
-            <div
-              class="row"
-              role="radiogroup"
-              aria-label="Cor da igreja"
-            >
-              <button
-                v-for="w in swatches"
-                :key="w"
-                type="button"
-                role="radio"
-                class="swatch"
-                :aria-checked="w.toLowerCase() === form.accentColor.toLowerCase()"
-                :aria-label="`Cor ${w}`"
-                :style="{ background: w }"
-                @click="form.accentColor = w.toLowerCase()"
-              />
-              <label class="swatch-custom">
-                <input
-                  v-model="form.accentColor"
-                  type="color"
-                  aria-label="Ajustar a cor"
-                >Ajustar
-              </label>
-            </div>
-            <p
-              class="soft"
-              style="margin-top:8px;font-size:13.5px"
-            >
-              {{ contrastMessage(form.accentColor) }}
-            </p>
-          </div>
-          <div style="background:var(--surface-3);border-radius:18px;padding:14px">
-            <p
-              class="caps"
-              style="margin-bottom:10px"
-            >
-              Como fica
-            </p>
-            <div
-              class="row"
-              style="gap:12px"
-            >
-              <span
-                class="btn btn--sm"
-                style="min-height:42px;pointer-events:none"
-              >Confirmar</span>
-              <span
-                class="tag tag--lg"
-                style="background:var(--accent-soft);color:var(--accent-deep)"
-              >Sua próxima escala</span>
-              <span
-                class="row"
-                style="flex-wrap:nowrap;gap:8px;background:#fff;border-radius:10px;padding:6px 10px 6px 6px;border:1px solid var(--control)"
-              >
-                <ChurchMark
-                  :name="form.name"
-                  :src="logoUrl"
-                  :size="18"
-                  :radius="4"
-                />
-                <span style="font-size:12.5px;font-weight:700;color:var(--ink-2)">{{ form.name }} · Guilda</span>
-              </span>
-              <span style="display:inline-flex;flex-direction:column;align-items:center;gap:4px">
-                <ChurchMark
-                  :name="form.name"
-                  :src="logoUrl"
-                  :size="48"
-                  :radius="12"
-                  style="box-shadow:0 4px 10px -4px rgba(0,0,0,.3)"
-                />
-                <span style="font-size:10px;font-weight:700;color:var(--ink-3)">ícone no celular</span>
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
 
-    <div class="card card--lg stack-md">
-      <h2 class="h3">
-        Igreja
-      </h2>
-      <label class="field"><span class="field__label">Nome</span><input
-        v-model="form.name"
-        class="input"
-      ></label>
-      <div class="grid-auto">
-        <label class="field"><span class="field__label">Onde os cultos acontecem</span><input
-          v-model="form.defaultLocation"
-          class="input"
-        ></label>
-        <label class="field"><span class="field__label">Fuso horário</span><select
-          v-model="form.timezone"
-          class="select"
-        >
-          <option
-            v-for="z in zones"
-            :key="z"
-            :value="z"
-          >{{ TZ_LABEL[z] ?? z }} ({{ z }})</option>
-        </select></label>
-      </div>
-      <label class="field"><span class="field__label">Livro de oração (Estêvão)</span><select
-        v-model="form.liturgicalPrayerBook"
-        class="select"
+    <div class="row settings-address">
+      <span class="ticon"><Icon
+        name="external"
+        :weight="2"
+      /></span>
+      <span class="grow"><strong>Endereço da igreja</strong><code>{{ churchAddress }}</code></span>
+      <button
+        type="button"
+        class="btn btn--line btn--xs"
+        @click="copyChurchAddress"
       >
-        <option
-          v-for="b in bookOptions"
-          :key="b.code"
-          :value="b.code"
-        >{{ b.name }}</option>
-      </select><span
-        v-if="books && !books.available"
-        class="field__hint"
-      >{{ books.reason }}</span></label>
-      <label class="field"><span class="field__label">Leituras do lecionário (Estêvão)</span><select
-        v-model="form.liturgicalReadingType"
-        class="select"
-      >
-        <option value="complementary">Complementares</option>
-        <option value="semicontinuous">Semicontínuas</option>
-      </select></label>
+        Copiar
+      </button>
     </div>
 
-    <div class="card card--lg stack-md">
-      <SwitchRow
-        v-model="form.reminderEnabled"
-        title="Lembrete semanal"
-        sub="Uma mensagem por pessoa com as tarefas dos próximos 7 dias."
-        large
-        style="padding:0"
-      >
-        <template #title>
-          <span
-            class="h3"
-            style="display:block"
-          >Lembrete semanal</span>
-        </template>
-      </SwitchRow>
-      <template v-if="form.reminderEnabled">
-        <div>
-          <p
-            class="field__label"
-          >
-            Que dia?
-          </p>
-          <div
-            class="chips"
-            role="radiogroup"
-            aria-label="Dia do lembrete"
-          >
-            <button
-              v-for="(d, i) in DAYS"
-              :key="d"
-              type="button"
-              role="radio"
-              class="daychip"
-              :aria-checked="form.reminderWeekday === i"
-              @click="form.reminderWeekday = i"
-            >
-              {{ d }}
-            </button>
-          </div>
-        </div>
-        <div
-          class="row"
-          style="gap:14px;align-items:flex-end"
-        >
-          <label class="field"><span class="field__label">Que hora?</span><input
-            v-model="form.reminderTime"
-            type="time"
-            class="input"
-            style="width:130px"
-          ></label>
-          <p
-            v-if="nextReminder"
-            style="margin-bottom:4px;font-size:14.5px;color:var(--ink-2);background:var(--accent-soft);border-radius:12px;padding:10px 14px"
-          >
-            Próximo envio: <strong>{{ nextReminder }}</strong>
-          </p>
-        </div>
-      </template>
-    </div>
+    <button
+      type="button"
+      class="card settings-identity"
+      @click="openSection('identity')"
+    >
+      <ChurchMark
+        :name="form.name"
+        :src="logoUrl"
+        :size="56"
+        :radius="16"
+      />
+      <span class="grow settings-identity__copy">
+        <strong>{{ form.name }}</strong>
+        <span>{{ [form.defaultLocation || 'Local não definido', TZ_LABEL[form.timezone] ?? form.timezone, 'cor da igreja'].join(' · ') }}</span>
+        <small>Editar nome, endereço, fuso, logo e cor</small>
+      </span>
+      <Icon
+        name="chevron-right"
+        :weight="2"
+      />
+    </button>
 
-    <div class="card card--lg stack-sm">
-      <h2 class="h3">
-        Confirmações
-      </h2>
-      <div class="row">
-        <p style="color:var(--ink-2)">
-          Pedir resposta até
-        </p>
-        <input
-          v-model="form.confirmationDeadlineHours"
-          type="number"
-          min="0"
-          max="336"
-          class="input input--sm"
-          style="width:90px;text-align:center"
-          aria-label="Horas antes do culto"
-        >
-        <p style="color:var(--ink-2)">
-          horas antes do culto.
-        </p>
-      </div>
-    </div>
-
-    <div class="card card--lg stack-sm">
-      <div class="row">
-        <h2 class="h3 grow">
-          WhatsApp da igreja
-        </h2>
-        <span
-          class="tag tag--lg"
-          :class="wa.tone"
-        >{{ wa.tag }}</span>
-      </div>
-      <p
-        class="soft"
-        style="font-size:15px"
-      >
-        {{ wa.text }}
-      </p>
+    <div class="card card--flush settings-list">
       <NuxtLink
         :to="link('/coordenacao/whatsapp')"
-        class="btn btn--secondary btn--md"
-        style="align-self:flex-start;min-height:44px"
+        class="listrow"
       >
-        Ver o passo a passo para ligar
+        <span class="ticon"><Icon
+          name="send"
+          :weight="2"
+        /></span>
+        <span class="grow"><strong class="settings-row__title">WhatsApp da igreja</strong><span class="settings-row__sub">{{ wa.tag }} · {{ toolCounts?.waSteps == null ? 'ver próximos passos' : `${toolCounts.waSteps} de 4 passos feitos` }}</span></span>
+        <span
+          class="tag"
+          :class="wa.tone"
+        >{{ wa.tag }}</span>
+        <Icon
+          name="chevron-right"
+          class="listrow__chev"
+        />
+      </NuxtLink>
+      <button
+        type="button"
+        class="listrow"
+        @click="openSection('reminder')"
+      >
+        <span class="ticon"><Icon
+          name="clock"
+          :weight="2"
+        /></span>
+        <span class="grow"><strong class="settings-row__title">Lembrete semanal</strong><span class="settings-row__sub">{{ form.reminderEnabled ? `${DAYS[form.reminderWeekday]}, ${hhmm(form.reminderTime)}` : 'Desativado' }} · confirmar até {{ form.confirmationDeadlineHours }}h antes</span></span>
+        <Icon
+          name="chevron-right"
+          class="listrow__chev"
+        />
+      </button>
+      <button
+        type="button"
+        class="listrow"
+        @click="openSection('liturgy')"
+      >
+        <span class="ticon"><Icon
+          name="book"
+          :weight="2"
+        /></span>
+        <span class="grow"><strong class="settings-row__title">Liturgia</strong><span class="settings-row__sub">{{ bookOptions.find((b) => b.code === form.liturgicalPrayerBook)?.name ?? form.liturgicalPrayerBook }} · {{ form.liturgicalReadingType === 'complementary' ? 'leituras complementares' : 'leituras semicontínuas' }}</span></span>
+        <Icon
+          name="chevron-right"
+          class="listrow__chev"
+        />
+      </button>
+      <NuxtLink
+        :to="link('/coordenacao/modelos')"
+        class="listrow"
+      >
+        <span class="ticon"><Icon
+          name="book"
+          :weight="2"
+        /></span>
+        <span class="grow"><strong class="settings-row__title">Modelos de liturgia</strong><span class="settings-row__sub">A ordem dos blocos de cada culto</span></span>
+        <Icon
+          name="chevron-right"
+          class="listrow__chev"
+        />
       </NuxtLink>
     </div>
 
     <div class="card card--flush">
-      <p style="padding:16px 18px 8px;font-size:20px;font-weight:800">
+      <p class="settings-section-title">
         Mais ferramentas
       </p>
       <div class="rows">
@@ -481,21 +368,253 @@ const tools = computed(() => [
           :label="m.label"
           :sub="m.sub"
           :badge="m.badge"
-          style="border-top:1px solid var(--line-2)"
         />
       </div>
     </div>
 
-    <div class="savebar">
-      <button
-        type="button"
-        class="btn btn--float"
-        style="padding:12px 24px"
-        :disabled="saving"
-        @click="save"
-      >
-        Salvar
-      </button>
-    </div>
+    <Sheet
+      :open="settingsSection === 'identity'"
+      panel
+      title="Identidade da igreja"
+      lede="A prévia usa sua cor enquanto você ajusta. As mudanças ficam salvas ao fechar."
+      @update:open="closeSection('identity', $event)"
+    >
+      <div class="stack-md settings-editor">
+        <label class="field"><span class="field__label">Nome da igreja</span><input
+          v-model="form.name"
+          class="input"
+        ></label>
+        <div class="fields-2">
+          <label class="field"><span class="field__label">Onde os cultos acontecem</span><input
+            v-model="form.defaultLocation"
+            class="input"
+          ></label>
+          <label class="field"><span class="field__label">Fuso horário</span><select
+            v-model="form.timezone"
+            class="select"
+          ><option
+            v-for="z in zones"
+            :key="z"
+            :value="z"
+          >{{ TZ_LABEL[z] ?? z }} ({{ z }})</option></select></label>
+        </div>
+        <div class="row settings-logo-row">
+          <div
+            class="stack-sm"
+            style="align-items:flex-start"
+          >
+            <label
+              class="logodrop"
+              :class="{ 'logodrop--has': logoUrl }"
+            >
+              <img
+                v-if="logoUrl"
+                :src="logoUrl"
+                :alt="`Logo de ${churchName}`"
+              >
+              <span
+                v-else
+                style="text-align:center;padding:12px"
+              ><Icon
+                name="upload"
+                :weight="2"
+                style="width:26px;height:26px"
+              /><span style="display:block;font-weight:800;font-size:13px;margin-top:4px">{{ uploading ? 'Enviando…' : 'Enviar logo' }}</span><span style="display:block;font-size:11.5px;opacity:.85">quadrado, PNG ou JPG</span></span>
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                aria-label="Enviar logo da igreja"
+                :disabled="uploading"
+                @change="onLogo"
+              >
+            </label>
+            <button
+              v-if="logoUrl"
+              type="button"
+              class="link link--muted"
+              @click="removeLogo"
+            >
+              Tirar logo
+            </button>
+          </div>
+          <div class="stack-md settings-color-panel">
+            <div>
+              <p
+                class="strong"
+                style="font-size:14.5px;margin-bottom:8px"
+              >
+                Cor da igreja
+              </p>
+              <div
+                class="row"
+                role="radiogroup"
+                aria-label="Cor da igreja"
+              >
+                <button
+                  v-for="w in swatches"
+                  :key="w"
+                  type="button"
+                  role="radio"
+                  class="swatch"
+                  :aria-checked="w.toLowerCase() === form.accentColor.toLowerCase()"
+                  :aria-label="`Cor ${w}`"
+                  :style="{ background: w }"
+                  @click="form.accentColor = w.toLowerCase()"
+                />
+                <label class="swatch-custom"><input
+                  v-model="form.accentColor"
+                  type="color"
+                  aria-label="Ajustar a cor"
+                >Ajustar</label>
+              </div>
+              <p
+                class="soft"
+                style="margin-top:8px;font-size:13.5px"
+              >
+                {{ contrastMessage(form.accentColor) }}
+              </p>
+            </div>
+            <div class="settings-preview">
+              <p
+                class="caps"
+                style="margin-bottom:10px"
+              >
+                Como fica
+              </p>
+              <div
+                class="row"
+                style="gap:12px"
+              >
+                <span
+                  class="btn btn--sm"
+                  style="min-height:42px;pointer-events:none"
+                >Confirmar</span>
+                <span
+                  class="tag tag--lg"
+                  style="background:var(--accent-soft);color:var(--accent-deep)"
+                >Sua próxima escala</span>
+                <ChurchMark
+                  :name="form.name"
+                  :src="logoUrl"
+                  :size="34"
+                  :radius="10"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+        <button
+          class="btn btn--block"
+          type="button"
+          :disabled="savingSection"
+          @click="saveSection('identity', false)"
+        >
+          {{ savingSection ? 'Salvando…' : 'Fechar e salvar' }}
+        </button>
+      </div>
+    </Sheet>
+
+    <Sheet
+      :open="settingsSection === 'reminder'"
+      panel
+      title="Lembrete semanal"
+      lede="Uma mensagem individual com as tarefas dos próximos 7 dias."
+      @update:open="closeSection('reminder', $event)"
+    >
+      <div class="stack-md settings-editor">
+        <SwitchRow
+          v-model="form.reminderEnabled"
+          title="Enviar lembrete semanal"
+          sub="Só para quem autorizou receber mensagens."
+          large
+        />
+        <template v-if="form.reminderEnabled">
+          <div>
+            <p class="field__label">
+              Que dia?
+            </p>
+            <div
+              class="chips"
+              role="radiogroup"
+              aria-label="Dia do lembrete"
+            >
+              <button
+                v-for="(d, i) in DAYS"
+                :key="d"
+                type="button"
+                role="radio"
+                class="daychip"
+                :aria-checked="form.reminderWeekday === i"
+                @click="form.reminderWeekday = i"
+              >
+                {{ d }}
+              </button>
+            </div>
+          </div>
+          <label class="field"><span class="field__label">Que hora?</span><input
+            v-model="form.reminderTime"
+            type="time"
+            class="input"
+            style="width:140px"
+          ></label>
+          <p
+            v-if="nextReminder"
+            class="settings-next-reminder"
+          >
+            Próximo envio: <strong>{{ nextReminder }}</strong>
+          </p>
+        </template>
+        <label class="field"><span class="field__label">Pedir confirmação até</span><div class="row"><input
+          v-model="form.confirmationDeadlineHours"
+          type="number"
+          min="0"
+          max="336"
+          class="input input--sm"
+          style="width:100px;text-align:center"
+        ><span class="soft">horas antes do culto</span></div></label>
+        <button
+          class="btn btn--block"
+          type="button"
+          :disabled="savingSection"
+          @click="saveSection('reminder', false)"
+        >
+          {{ savingSection ? 'Salvando…' : 'Fechar e salvar' }}
+        </button>
+      </div>
+    </Sheet>
+
+    <Sheet
+      :open="settingsSection === 'liturgy'"
+      panel
+      title="Liturgia"
+      lede="Escolha o livro de oração e o tipo de leitura que a igreja usa."
+      @update:open="closeSection('liturgy', $event)"
+    >
+      <div class="stack-md settings-editor">
+        <label class="field"><span class="field__label">Livro de oração (Estêvão)</span><select
+          v-model="form.liturgicalPrayerBook"
+          class="select"
+        ><option
+          v-for="b in bookOptions"
+          :key="b.code"
+          :value="b.code"
+        >{{ b.name }}</option></select><span
+          v-if="books && !books.available"
+          class="field__hint"
+        >{{ books.reason }}</span></label>
+        <label class="field"><span class="field__label">Leituras do lecionário (Estêvão)</span><select
+          v-model="form.liturgicalReadingType"
+          class="select"
+        ><option value="complementary">Complementares</option><option value="semicontinuous">Semicontínuas</option></select></label>
+        <button
+          class="btn btn--block"
+          type="button"
+          :disabled="savingSection"
+          @click="saveSection('liturgy', false)"
+        >
+          {{ savingSection ? 'Salvando…' : 'Fechar e salvar' }}
+        </button>
+      </div>
+    </Sheet>
   </section>
 </template>

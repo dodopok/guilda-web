@@ -27,6 +27,17 @@ const dutyRes = reactive<Record<string, string>>({})
 const peopleRes = reactive<Record<string, string>>({}) // chave -> personId | 'ignore' | '__new'
 const busy = ref(false)
 const result = ref<Stats | null>(null)
+const importPreviewOpen = ref(false)
+let previewMedia: MediaQueryList | null = null
+function syncPreviewForViewport() {
+  if (previewMedia?.matches) importPreviewOpen.value = true
+}
+onMounted(() => {
+  previewMedia = window.matchMedia('(min-width: 900px)')
+  syncPreviewForViewport()
+  previewMedia.addEventListener('change', syncPreviewForViewport)
+})
+onUnmounted(() => previewMedia?.removeEventListener('change', syncPreviewForViewport))
 
 // .xlsx vira texto separado por ";" no próprio navegador; o arquivo não sai do aparelho.
 async function readFile(e: Event) {
@@ -263,175 +274,194 @@ function restart() {
         </div>
       </div>
 
-      <div
-        v-if="unknownPeople.length"
-        class="card"
-      >
-        <div
-          class="row"
-          style="gap:10px"
-        >
-          <h2 style="font-size:18px;flex:1">
-            Nomes que não reconhecemos
-          </h2>
-          <span class="badge-amber">{{ unknownPeople.length }}</span>
-        </div>
-        <p
-          class="soft"
-          style="margin:4px 0 12px;font-size:14px"
-        >
-          Diga quem é cada um — ou crie a pessoa.
-        </p>
-        <div class="stack-sm">
+      <div class="import-review-layout">
+        <div class="stack-md import-review-issues">
           <div
-            v-for="p in unknownPeople"
-            :key="p.key"
-            class="row"
-            style="gap:10px;padding:10px 12px;border-radius:14px;background:var(--surface-2)"
+            v-if="unknownPeople.length"
+            class="card"
           >
-            <span
-              class="strong"
-              style="min-width:110px"
-            >“{{ p.raw }}”</span>
-            <span
-              class="muted"
-              style="font-size:13.5px;flex:1;min-width:120px"
-            >{{ p.where }}</span>
-            <select
-              v-model="peopleRes[p.key]"
-              class="select"
-              style="width:auto;min-width:180px;min-height:40px;padding:8px 12px;font-size:14.5px"
-              :aria-label="`Quem é ${p.raw}?`"
+            <div
+              class="row"
+              style="gap:10px"
             >
-              <option :value="undefined">
-                Quem é?
-              </option>
-              <optgroup
-                v-if="p.candidates.length"
-                label="Parecidos"
+              <h2 style="font-size:18px;flex:1">
+                Nomes que não reconhecemos
+              </h2>
+              <span class="badge-amber">{{ unknownPeople.length }}</span>
+            </div>
+            <p
+              class="soft"
+              style="margin:4px 0 12px;font-size:14px"
+            >
+              Diga quem é cada um — ou crie a pessoa.
+            </p>
+            <div class="stack-sm">
+              <div
+                v-for="p in unknownPeople"
+                :key="p.key"
+                class="row"
+                style="gap:10px;padding:10px 12px;border-radius:14px;background:var(--surface-2)"
               >
-                <option
-                  v-for="c in p.candidates"
-                  :key="c.id"
-                  :value="c.id"
+                <span
+                  class="strong"
+                  style="min-width:110px"
+                >“{{ p.raw }}”</span>
+                <span
+                  class="muted"
+                  style="font-size:13.5px;flex:1;min-width:120px"
+                >{{ p.where }}</span>
+                <select
+                  v-model="peopleRes[p.key]"
+                  class="select"
+                  style="width:auto;min-width:180px;min-height:40px;padding:8px 12px;font-size:14.5px"
+                  :aria-label="`Quem é ${p.raw}?`"
                 >
-                  {{ c.name }}
-                </option>
-              </optgroup>
-              <optgroup label="Todas as pessoas">
-                <option
-                  v-for="c in preview.people"
-                  :key="c.id"
-                  :value="c.id"
+                  <option :value="undefined">
+                    Quem é?
+                  </option>
+                  <optgroup
+                    v-if="p.candidates.length"
+                    label="Parecidos"
+                  >
+                    <option
+                      v-for="c in p.candidates"
+                      :key="c.id"
+                      :value="c.id"
+                    >
+                      {{ c.name }}
+                    </option>
+                  </optgroup>
+                  <optgroup label="Todas as pessoas">
+                    <option
+                      v-for="c in preview.people"
+                      :key="c.id"
+                      :value="c.id"
+                    >
+                      {{ c.name }}
+                    </option>
+                  </optgroup>
+                  <option value="__new">
+                    Criar pessoa nova
+                  </option>
+                  <option value="ignore">
+                    Não importar este nome
+                  </option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div
+            v-if="unknownDuties.length"
+            class="card"
+          >
+            <div
+              class="row"
+              style="gap:10px"
+            >
+              <h2 style="font-size:18px;flex:1">
+                Funções que não reconhecemos
+              </h2>
+              <span class="badge-amber">{{ unknownDuties.length }}</span>
+            </div>
+            <p
+              class="soft"
+              style="margin:4px 0 12px;font-size:14px"
+            >
+              Ligue cada rótulo da planilha a uma função da igreja.
+            </p>
+            <div class="stack-sm">
+              <div
+                v-for="d in unknownDuties"
+                :key="d.key"
+                class="row"
+                style="gap:10px;padding:10px 12px;border-radius:14px;background:var(--surface-2)"
+              >
+                <span
+                  class="strong"
+                  style="flex:1;min-width:140px"
+                >“{{ d.label }}”</span>
+                <select
+                  v-model="dutyRes[d.key]"
+                  class="select"
+                  style="width:auto;min-width:180px;min-height:40px;padding:8px 12px;font-size:14.5px"
+                  :aria-label="`Qual função é ${d.label}?`"
                 >
-                  {{ c.name }}
-                </option>
-              </optgroup>
-              <option value="__new">
-                Criar pessoa nova
-              </option>
-              <option value="ignore">
-                Não importar este nome
-              </option>
-            </select>
+                  <option :value="undefined">
+                    Qual função?
+                  </option>
+                  <option
+                    v-for="x in preview.duties"
+                    :key="x.id"
+                    :value="x.id"
+                  >
+                    {{ x.name }}
+                  </option>
+                  <option value="ignore">
+                    Não importar
+                  </option>
+                </select>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
 
-      <div
-        v-if="unknownDuties.length"
-        class="card"
-      >
-        <div
-          class="row"
-          style="gap:10px"
+        <details
+          class="card import-preview"
+          :open="importPreviewOpen"
+          @toggle="importPreviewOpen = ($event.currentTarget as HTMLDetailsElement).open"
         >
-          <h2 style="font-size:18px;flex:1">
-            Funções que não reconhecemos
-          </h2>
-          <span class="badge-amber">{{ unknownDuties.length }}</span>
-        </div>
-        <p
-          class="soft"
-          style="margin:4px 0 12px;font-size:14px"
-        >
-          Ligue cada rótulo da planilha a uma função da igreja.
-        </p>
-        <div class="stack-sm">
-          <div
-            v-for="d in unknownDuties"
-            :key="d.key"
-            class="row"
-            style="gap:10px;padding:10px 12px;border-radius:14px;background:var(--surface-2)"
+          <summary
+            class="row row--between"
+            @click="syncPreviewForViewport"
           >
-            <span
-              class="strong"
-              style="flex:1;min-width:140px"
-            >“{{ d.label }}”</span>
-            <select
-              v-model="dutyRes[d.key]"
-              class="select"
-              style="width:auto;min-width:180px;min-height:40px;padding:8px 12px;font-size:14.5px"
-              :aria-label="`Qual função é ${d.label}?`"
+            <span class="grow"><strong>Ver as {{ lines.length }} linhas reconhecidas</strong><span class="import-preview__sub">Conferidas automaticamente; abra para revisar</span></span>
+            <span class="tag tag--ok">{{ importable }} entram</span>
+            <Icon
+              name="chevron-down"
+              :weight="2"
+              class="listrow__chev"
+            />
+          </summary>
+          <div class="import-preview__body">
+            <div
+              v-for="l in lines.slice(0, SHOW)"
+              :key="l.key"
+              class="row"
+              style="gap:10px;padding:8px 0;border-top:1px solid var(--line-2);font-size:14.5px;flex-wrap:nowrap"
             >
-              <option :value="undefined">
-                Qual função?
-              </option>
-              <option
-                v-for="x in preview.duties"
-                :key="x.id"
-                :value="x.id"
-              >
-                {{ x.name }}
-              </option>
-              <option value="ignore">
-                Não importar
-              </option>
-            </select>
+              <span
+                class="strong"
+                style="min-width:56px;font-weight:700"
+              >{{ l.day }}</span>
+              <span
+                class="soft"
+                style="min-width:110px"
+                :style="l.dutyOk ? '' : 'color:#a86400'"
+              >{{ l.duty }}</span>
+              <span style="flex:1;min-width:0">{{ l.name }}</span>
+              <span
+                v-if="l.tag"
+                class="stag"
+                :style="{ background: l.tag.bg, color: l.tag.fg }"
+              >{{ l.tag.t }}</span>
+            </div>
+            <p
+              v-if="lines.length > SHOW"
+              class="small muted"
+              style="padding-top:8px"
+            >
+              e mais {{ lines.length - SHOW }} linhas.
+            </p>
+            <p
+              v-if="preview.summary.nonSundayDates.length"
+              class="small"
+              style="padding-top:8px;color:#a86400"
+            >
+              Datas fora do domingo: {{ preview.summary.nonSundayDates.map((d) => shortDate(`${d}T12:00:00Z`, 'UTC')).join(', ') }}. Confira se estão certas.
+            </p>
           </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <h2 style="font-size:18px;margin-bottom:6px">
-          Prévia
-        </h2>
-        <div
-          v-for="l in lines.slice(0, SHOW)"
-          :key="l.key"
-          class="row"
-          style="gap:10px;padding:8px 0;border-top:1px solid var(--line-2);font-size:14.5px;flex-wrap:nowrap"
-        >
-          <span
-            class="strong"
-            style="min-width:56px;font-weight:700"
-          >{{ l.day }}</span>
-          <span
-            class="soft"
-            style="min-width:110px"
-            :style="l.dutyOk ? '' : 'color:#a86400'"
-          >{{ l.duty }}</span>
-          <span style="flex:1;min-width:0">{{ l.name }}</span>
-          <span
-            v-if="l.tag"
-            class="stag"
-            :style="{ background: l.tag.bg, color: l.tag.fg }"
-          >{{ l.tag.t }}</span>
-        </div>
-        <p
-          v-if="lines.length > SHOW"
-          class="small muted"
-          style="padding-top:8px"
-        >
-          e mais {{ lines.length - SHOW }} linhas.
-        </p>
-        <p
-          v-if="preview.summary.nonSundayDates.length"
-          class="small"
-          style="padding-top:8px;color:#a86400"
-        >
-          Datas fora do domingo: {{ preview.summary.nonSundayDates.map((d) => shortDate(`${d}T12:00:00Z`, 'UTC')).join(', ') }}. Confira se estão certas.
-        </p>
+        </details>
       </div>
 
       <div class="savebar">

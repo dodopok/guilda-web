@@ -302,6 +302,7 @@ export async function mySwaps(db: Db, ctx: ChurchContext) {
     created_at: Date
     responded_at: Date | null
     assignment_id: string
+    service_id: string
     from_person_id: string
     candidate_person_id: string
     from_name: string
@@ -310,10 +311,24 @@ export async function mySwaps(db: Db, ctx: ChurchContext) {
     service_title: string
     starts_at: Date
     location: string | null
+    arrival_at: Date | null
+    arrival_minutes_before: number | null
+    coworkers: string[] | null
   }
   const rows = await db.execute<SwapRow>(sql`
     select sr.id, sr.status, sr.message, sr.created_at, sr.responded_at, sr.assignment_id, sr.from_person_id, sr.candidate_person_id,
-      ${fromPeople} as from_name, cand_p.display_name as candidate_name, d.name as duty_name, s.title as service_title, s.starts_at, s.location
+      s.id as service_id, ${fromPeople} as from_name, cand_p.display_name as candidate_name,
+      d.name as duty_name, s.title as service_title, s.starts_at, s.location, sl.arrival_at, d.arrival_minutes_before,
+      ARRAY(
+        SELECT DISTINCT teammate_p.display_name
+        FROM assignments teammate_a
+        JOIN slots teammate_sl ON teammate_sl.church_id = teammate_a.church_id AND teammate_sl.id = teammate_a.slot_id
+        JOIN people teammate_p ON teammate_p.church_id = teammate_a.church_id AND teammate_p.id = teammate_a.person_id
+        WHERE teammate_a.church_id = sr.church_id AND teammate_sl.service_id = s.id
+          AND teammate_a.person_id <> sr.from_person_id AND teammate_a.person_id <> sr.candidate_person_id
+          AND teammate_a.status <> 'declined'
+        ORDER BY teammate_p.display_name
+      ) as coworkers
     from swap_requests sr
     join people from_p on from_p.church_id = sr.church_id and from_p.id = sr.from_person_id
     join people cand_p on cand_p.church_id = sr.church_id and cand_p.id = sr.candidate_person_id
@@ -332,12 +347,20 @@ export async function mySwaps(db: Db, ctx: ChurchContext) {
     createdAt: new Date(r.created_at),
     respondedAt: r.responded_at ? new Date(r.responded_at) : null,
     direction: r.candidate_person_id === me ? 'received' : 'sent',
+    assignmentId: r.assignment_id,
+    serviceId: r.service_id,
     fromName: r.from_name,
     candidateName: r.candidate_name,
     dutyName: r.duty_name,
     serviceTitle: r.service_title,
     startsAt: new Date(r.starts_at),
     location: r.location,
+    arrivalAt: r.arrival_at
+      ? new Date(r.arrival_at)
+      : r.arrival_minutes_before === null
+        ? null
+        : new Date(r.starts_at.getTime() - r.arrival_minutes_before * 60_000),
+    coworkers: r.coworkers ?? [],
   }))
 }
 

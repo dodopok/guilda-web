@@ -3,10 +3,16 @@ useHead({ title: 'Modelos de liturgia' })
 const route = useRoute()
 const { capi, link } = useChurch()
 const toast = useToast()
-interface T { id: string, name: string, kind: string, description: string | null, archived: boolean, blockCount: number }
+interface T { id: string, name: string, kind: string, description: string | null, archived: boolean, blockCount: number, usedInScripts: number, contentSources: string[] }
 const { data, refresh } = await useAsyncData(`templates-${route.params.slug}`, () => capi<{ templates: T[] }>('/templates'))
 const active = computed(() => (data.value?.templates ?? []).filter((t) => !t.archived))
 const archived = computed(() => (data.value?.templates ?? []).filter((t) => t.archived))
+const sourceLabel = (t: T) => {
+  const labels: Record<string, string> = { church: 'da igreja', loc_manual: 'do LOC', estevao: 'do Estêvão', other: 'de outra fonte' }
+  const names = [...new Set(t.contentSources.map((source) => labels[source] ?? 'da igreja'))]
+  return names.length ? names.join(' e ') : 'sem conteúdo ainda'
+}
+const usageLabel = (t: T) => t.usedInScripts ? `usado em ${plural(t.usedInScripts, 'roteiro', 'roteiros')}` : 'nenhum roteiro usa ainda'
 
 const busy = ref(false)
 async function create() {
@@ -96,25 +102,31 @@ async function setArchived(t: T, value: boolean) {
             <span
               class="soft"
               style="display:block;font-size:13.5px"
-            >{{ plural(t.blockCount, 'bloco', 'blocos') }}{{ t.description ? ` · ${t.description}` : '' }}</span>
+            >{{ plural(t.blockCount, 'bloco', 'blocos') }} · {{ usageLabel(t) }} · Conteúdo {{ sourceLabel(t) }}{{ t.description ? ` · ${t.description}` : '' }}</span>
           </span>
         </NuxtLink>
-        <span
-          class="row"
-          style="gap:6px"
-        >
-          <button
-            type="button"
-            class="btn btn--line btn--xs"
-            @click="duplicate(t)"
-          >Duplicar</button>
-          <button
-            type="button"
-            class="btn btn--line btn--xs"
-            style="color:var(--muted)"
-            @click="setArchived(t, true)"
-          >Arquivar</button>
-        </span>
+        <details class="template-actions">
+          <summary
+            class="template-actions__trigger"
+            :aria-label="`Mais ações para ${t.name}`"
+          >
+            ···
+          </summary>
+          <div class="template-actions__menu">
+            <button
+              type="button"
+              @click="duplicate(t)"
+            >
+              Duplicar
+            </button>
+            <button
+              type="button"
+              @click="setArchived(t, true)"
+            >
+              Arquivar
+            </button>
+          </div>
+        </details>
       </div>
     </div>
     <EmptyState

@@ -11,7 +11,6 @@ interface InviteInfo { churchName: string, timezone: string, firstName: string, 
 const invite = ref<InviteInfo | null>(null)
 const loadError = ref('')
 const password = ref('')
-const confirm = ref('')
 const error = ref('')
 const busy = ref(false)
 const slug = ref('')
@@ -32,7 +31,7 @@ onMounted(async () => {
 useHead(() => ({ htmlAttrs: { style: accentStyle(invite.value?.accentColor) } }))
 const logo = computed(() => (invite.value?.hasLogo ? `/api/v1/invites/${token}/logo` : null))
 
-const canSubmit = computed(() => (invite.value?.accountExists ? password.value.length > 0 : password.value.length >= 10 && password.value === confirm.value))
+const canSubmit = computed(() => (invite.value?.accountExists ? password.value.length > 0 : password.value.length >= 10))
 const passwordStrength = computed(() => {
   if (!password.value) return { label: 'Mínimo de 10 caracteres', level: 0 }
   const score = Number(password.value.length >= 10) + Number(/[A-ZÀ-Ý]/.test(password.value)) + Number(/[a-zà-ÿ]/.test(password.value)) + Number(/\d/.test(password.value)) + Number(/[^A-Za-zÀ-ÿ0-9]/.test(password.value))
@@ -41,7 +40,7 @@ const passwordStrength = computed(() => {
 async function acceptInvite() {
   error.value = ''
   if (!accepted.value && !canSubmit.value) {
-    error.value = invite.value?.accountExists ? 'Digite sua senha atual.' : 'Confira a senha: pelo menos 10 caracteres, digitada igual duas vezes.'
+    error.value = invite.value?.accountExists ? 'Digite sua senha atual.' : 'A senha precisa ter pelo menos 10 caracteres.'
     return
   }
   busy.value = true
@@ -164,12 +163,6 @@ const reminderLine = computed(() => {
               /></span>
               {{ passwordStrength.label }}
             </p>
-            <PasswordField
-              v-if="!invite.accountExists"
-              v-model="confirm"
-              label="Repita a senha"
-              autocomplete="new-password"
-            />
           </div>
           <section
             class="invite-consent"

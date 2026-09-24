@@ -4,7 +4,7 @@ import { plainRichText } from '#shared/liturgy'
 
 // Leitura do roteiro publicado, pensada para o celular: quem faz o quê, textos
 // recolhidos (toque para ver inteiro), leituras, músicas e avisos.
-const props = defineProps<{ content: PublishedContent }>()
+const props = defineProps<{ content: PublishedContent, myName?: string, arrival?: string | null, location?: string | null }>()
 const open = ref<Set<string>>(new Set())
 function toggle(id: string) {
   const next = new Set(open.value)
@@ -24,89 +24,147 @@ const blocks = computed(() => props.content.blocks.map((b) => {
   const text = body(b)
   const rich = b.type === 'rite' || b.type === 'collect' || b.type === 'text'
   const long = rich && plainRichText(text).length > 180
-  return { ...b, text, rich, long, who: b.type === 'psalm' && !b.responsibles.length ? 'todos' : b.responsibles.map((r) => r.name).join(', ') }
+  const mine = Boolean(props.myName && b.responsibles.some((r) => r.name.trim().toLocaleLowerCase('pt-BR') === props.myName!.trim().toLocaleLowerCase('pt-BR')))
+  return { ...b, text, rich, long, mine, who: b.type === 'psalm' && !b.responsibles.length ? 'todos' : b.responsibles.map((r) => r.name).join(', ') }
 }))
+const myBlock = computed(() => blocks.value.find((b) => b.mine && (b.type === 'reading' || b.type === 'psalm')))
 </script>
 
 <template>
-  <ol
-    class="stack-sm"
-    style="list-style:none;margin:0;padding:0"
-  >
-    <li
-      v-for="b in blocks"
-      :key="b.id"
-      class="card"
-      style="border-radius:18px"
+  <div class="script-reader-layout">
+    <div class="script-reader-main">
+      <div
+        v-if="myBlock"
+        class="script-reader-your-part"
+      >
+        <div class="grow">
+          <p class="caps">
+            Sua parte no roteiro
+          </p>
+          <h2 class="script-reader-your-part__title">
+            Você lê {{ myBlock.title }}
+          </h2>
+          <p
+            v-if="myBlock.reference"
+            class="strong"
+            style="margin-top:2px"
+          >
+            {{ myBlock.reference }}
+          </p>
+          <p class="script-reader-your-part__meta">
+            <span v-if="arrival">Chegue às {{ arrival }}</span>
+            <span v-if="location">{{ location }}</span>
+            <span>{{ content.service.time }} · {{ content.service.title }}</span>
+          </p>
+        </div>
+        <a
+          class="btn btn--sm"
+          :href="`#script-block-${myBlock.id}`"
+        >Ir para sua parte</a>
+      </div>
+      <ol
+        class="stack-sm"
+        style="list-style:none;margin:0;padding:0"
+      >
+        <li
+          v-for="b in blocks"
+          :id="`script-block-${b.id}`"
+          :key="b.id"
+          class="card"
+          :class="{ 'script-reader-block': true, 'script-reader-block--mine': b.mine }"
+          style="border-radius:18px"
+        >
+          <div
+            class="row"
+            style="align-items:baseline"
+          >
+            <span
+              v-if="KIND[b.type]"
+              class="caps"
+              style="font-size:11.5px;min-width:60px"
+            >{{ KIND[b.type] }}</span>
+            <h3
+              class="grow"
+              style="font-size:17px"
+            >
+              {{ b.title }}
+            </h3>
+            <span
+              v-if="b.who"
+              style="font-size:13.5px;font-weight:700;color:var(--accent-deep)"
+            >{{ b.who }}</span>
+          </div>
+          <!-- Leituras: anúncio, referência e resposta de todos (em negrito). -->
+          <div
+            v-if="b.type === 'reading' || b.type === 'psalm'"
+            class="richtext"
+            style="margin-top:8px"
+          >
+            <template v-if="b.responses?.open">
+              <p>{{ b.responses.open.leader }}</p>
+              <p v-if="b.responses.open.people">
+                <strong>Todos: {{ b.responses.open.people }}</strong>
+              </p>
+            </template>
+            <p class="script-reader-block__reference">
+              {{ b.text }}
+            </p>
+            <template v-if="b.responses?.close">
+              <p>{{ b.responses.close.leader }}</p>
+              <p v-if="b.responses.close.people">
+                <strong>Todos: {{ b.responses.close.people }}</strong>
+              </p>
+            </template>
+          </div>
+          <template v-else-if="b.text">
+            <RichText
+              v-if="b.rich"
+              :text="b.text"
+              class="prose"
+              :class="{ 'richtext--clamp': b.long && !open.has(b.id) }"
+              style="margin-top:8px"
+            />
+            <p
+              v-else
+              class="prose"
+              style="margin-top:8px;white-space:pre-line"
+            >
+              {{ b.text }}
+            </p>
+            <button
+              v-if="b.long"
+              type="button"
+              class="link link--ink"
+              style="margin-top:6px;padding:4px 0"
+              :aria-expanded="open.has(b.id)"
+              @click="toggle(b.id)"
+            >
+              {{ open.has(b.id) ? 'Ver menos' : 'Ver texto completo' }}
+            </button>
+          </template>
+        </li>
+      </ol>
+    </div>
+    <aside
+      v-if="blocks.length"
+      class="script-reader-outline"
     >
-      <div
-        class="row"
-        style="align-items:baseline"
+      <p
+        class="caps"
+        style="padding:2px 10px 8px"
       >
-        <span
-          v-if="KIND[b.type]"
-          class="caps"
-          style="font-size:11.5px;min-width:60px"
-        >{{ KIND[b.type] }}</span>
-        <h3
-          class="grow"
-          style="font-size:17px"
+        Ordem do culto
+      </p>
+      <nav aria-label="Índice do roteiro">
+        <a
+          v-for="b in blocks"
+          :key="b.id"
+          :href="`#script-block-${b.id}`"
+          :aria-current="myBlock?.id === b.id ? 'true' : undefined"
         >
-          {{ b.title }}
-        </h3>
-        <span
-          v-if="b.who"
-          style="font-size:13.5px;font-weight:700;color:var(--accent-deep)"
-        >{{ b.who }}</span>
-      </div>
-      <!-- Leituras: anúncio, referência e resposta de todos (em negrito). -->
-      <div
-        v-if="b.type === 'reading' || b.type === 'psalm'"
-        class="richtext"
-        style="margin-top:8px"
-      >
-        <template v-if="b.responses?.open">
-          <p>{{ b.responses.open.leader }}</p>
-          <p v-if="b.responses.open.people">
-            <strong>Todos: {{ b.responses.open.people }}</strong>
-          </p>
-        </template>
-        <p class="strong">
-          {{ b.text }}
-        </p>
-        <template v-if="b.responses?.close">
-          <p>{{ b.responses.close.leader }}</p>
-          <p v-if="b.responses.close.people">
-            <strong>Todos: {{ b.responses.close.people }}</strong>
-          </p>
-        </template>
-      </div>
-      <template v-else-if="b.text">
-        <RichText
-          v-if="b.rich"
-          :text="b.text"
-          class="prose"
-          :class="{ 'richtext--clamp': b.long && !open.has(b.id) }"
-          style="margin-top:8px"
-        />
-        <p
-          v-else
-          class="prose"
-          style="margin-top:8px;white-space:pre-line"
-        >
-          {{ b.text }}
-        </p>
-        <button
-          v-if="b.long"
-          type="button"
-          class="link link--ink"
-          style="margin-top:6px;padding:4px 0"
-          :aria-expanded="open.has(b.id)"
-          @click="toggle(b.id)"
-        >
-          {{ open.has(b.id) ? 'Ver menos' : 'Ver texto completo' }}
-        </button>
-      </template>
-    </li>
-  </ol>
+          <span class="grow"><span>{{ b.title }}</span><span class="script-reader-outline__who">{{ b.mine ? 'você' : (b.who || '—') }}</span></span>
+        </a>
+      </nav>
+    </aside>
+  </div>
 </template>

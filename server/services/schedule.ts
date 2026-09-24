@@ -469,6 +469,37 @@ export async function myTasks(db: Db, ctx: ChurchContext, opts: { from?: Date } 
       gte(services.startsAt, from),
     ))
     .orderBy(asc(services.startsAt), asc(slots.position))
+  const serviceIds = [...new Set(rows.map((r) => r.service.id))]
+  const coworkerRows = serviceIds.length
+    ? await db.select({
+        serviceId: services.id,
+        personId: people.id,
+        displayName: people.displayName,
+        dutyName: duties.name,
+      }).from(assignments)
+        .innerJoin(slots, and(eq(slots.churchId, assignments.churchId), eq(slots.id, assignments.slotId)))
+        .innerJoin(services, and(eq(services.churchId, slots.churchId), eq(services.id, slots.serviceId)))
+        .innerJoin(duties, and(eq(duties.churchId, slots.churchId), eq(duties.id, slots.dutyId)))
+        .innerJoin(people, and(eq(people.churchId, assignments.churchId), eq(people.id, assignments.personId)))
+        .where(and(
+          eq(assignments.churchId, ctx.church.id),
+          inArray(services.id, serviceIds),
+          ne(assignments.personId, ctx.personId!),
+          ne(assignments.status, 'declined'),
+        ))
+        .orderBy(asc(people.nameKey), asc(duties.position))
+    : []
+  const coworkersByService = new Map<string, { personId: string, displayName: string, duties: string[] }[]>()
+  for (const row of coworkerRows) {
+    const peopleForService = coworkersByService.get(row.serviceId) ?? []
+    let coworker = peopleForService.find((p) => p.personId === row.personId)
+    if (!coworker) {
+      coworker = { personId: row.personId, displayName: row.displayName, duties: [] }
+      peopleForService.push(coworker)
+      coworkersByService.set(row.serviceId, peopleForService)
+    }
+    if (!coworker.duties.includes(row.dutyName)) coworker.duties.push(row.dutyName)
+  }
   const assignmentIds = rows.map((r) => r.assignment.id)
   const swaps = assignmentIds.length
     ? await db.select({ swap: swapRequests, candidateName: people.displayName }).from(swapRequests)
@@ -478,6 +509,7 @@ export async function myTasks(db: Db, ctx: ChurchContext, opts: { from?: Date } 
   const deadlineHours = ctx.church.confirmationDeadlineHours
   return rows.map((r) => ({
     assignmentId: r.assignment.id,
+    personId: r.assignment.personId,
     status: r.assignment.status,
     rowVersion: r.assignment.rowVersion,
     service: {
@@ -491,6 +523,7 @@ export async function myTasks(db: Db, ctx: ChurchContext, opts: { from?: Date } 
     },
     duty: { id: r.duty.id, name: r.duty.name, instructions: r.duty.instructions, ministry: r.ministryName, kind: r.duty.kind },
     arrivalAt: arrivalFor(r.service.startsAt, r.slot.arrivalAt, r.duty.arrivalMinutesBefore),
+    coworkers: coworkersByService.get(r.service.id) ?? [],
     note: r.slot.note,
     respondBy: new Date(r.service.startsAt.getTime() - deadlineHours * 3600_000),
     openSwaps: swaps.filter((s) => s.swap.assignmentId === r.assignment.id).map((s) => ({ id: s.swap.id, candidateName: s.candidateName, createdAt: s.swap.createdAt })),

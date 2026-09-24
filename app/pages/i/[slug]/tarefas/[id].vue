@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Task } from '~/types'
+import type { ScriptView, Task } from '~/types'
 
 useHead({ title: 'Tarefa' })
 const route = useRoute()
@@ -22,6 +22,20 @@ const isPast = computed(() => (task.value ? new Date(task.value.service.startsAt
 const openSwap = computed(() => task.value?.openSwaps[0] ?? null)
 const location = computed(() => task.value?.service.location ?? info.value?.church.defaultLocation ?? null)
 const dateLabel = computed(() => (task.value ? `${longDate(task.value.service.startsAt, tz.value)} · ${time(task.value.service.startsAt, tz.value)}` : ''))
+const taskScript = shallowRef<ScriptView | null>(null)
+watch(() => task.value?.service.id, async (serviceId, _old, onCleanup) => {
+  taskScript.value = null
+  if (!serviceId) return
+  let stale = false
+  onCleanup(() => { stale = true })
+  try {
+    const script = await capi<ScriptView>(`/scripts/${serviceId}`)
+    if (!stale) taskScript.value = script
+  } catch {
+    if (!stale) taskScript.value = null
+  }
+}, { immediate: true })
+const ownScriptBlock = computed(() => taskScript.value?.published?.content.blocks.find((block) => block.dutyId === task.value?.duty.id && (!block.personId || block.personId === task.value?.personId)) ?? null)
 const sideGroups = computed(() => [
   { label: 'Próximas', items: (data.value?.tasks ?? []).filter((t) => new Date(t.service.startsAt).getTime() >= Date.now()) },
   { label: 'Já passaram', items: (data.value?.tasks ?? []).filter((t) => new Date(t.service.startsAt).getTime() < Date.now()).reverse() },
@@ -117,37 +131,51 @@ const history = computed(() => {
           class="card card--flush rows"
           :aria-label="group.label"
         >
-          <NuxtLink
+          <div
             v-for="item in group.items"
             :key="item.assignmentId"
-            :to="link(`/tarefas/${item.assignmentId}`)"
-            class="task-detail-list__item"
-            :class="{ 'task-detail-list__item--current': item.assignmentId === task.assignmentId }"
-            :aria-current="item.assignmentId === task.assignmentId ? 'page' : undefined"
+            class="task-detail-list__row"
           >
-            <span
-              class="dtile"
-              style="width:42px;padding:5px 0"
-              aria-hidden="true"
+            <NuxtLink
+              :to="link(`/tarefas/${item.assignmentId}`)"
+              class="task-detail-list__link"
+              :class="{ 'task-detail-list__item--current': item.assignmentId === task.assignmentId }"
+              :aria-current="item.assignmentId === task.assignmentId ? 'page' : undefined"
             >
               <span
-                class="dtile__wd"
-                style="display:block;font-size:9px"
-              >{{ weekdayShort(item.service.startsAt, tz) }}</span>
+                class="dtile"
+                style="width:42px;padding:5px 0"
+                aria-hidden="true"
+              >
+                <span
+                  class="dtile__wd"
+                  style="display:block;font-size:9px"
+                >{{ weekdayShort(item.service.startsAt, tz) }}</span>
+                <span
+                  class="dtile__day"
+                  style="display:block;font-size:20px"
+                >{{ dayNumber(item.service.startsAt, tz) }}</span>
+              </span>
+              <span class="grow">
+                <span class="task-detail-list__name">{{ item.duty.name }}</span>
+                <span class="task-detail-list__sub">{{ time(item.service.startsAt, tz) }} · {{ item.service.title }}</span>
+              </span>
               <span
-                class="dtile__day"
-                style="display:block;font-size:20px"
-              >{{ dayNumber(item.service.startsAt, tz) }}</span>
-            </span>
-            <span class="grow">
-              <span class="task-detail-list__name">{{ item.duty.name }}</span>
-              <span class="task-detail-list__sub">{{ time(item.service.startsAt, tz) }} · {{ item.service.title }}</span>
-            </span>
-            <span
-              class="stag"
-              :style="{ background: taskTag(item).bg, color: taskTag(item).fg }"
-            >{{ taskTag(item).label }}</span>
-          </NuxtLink>
+                class="stag"
+                :style="{ background: taskTag(item).bg, color: taskTag(item).fg }"
+              >{{ taskTag(item).label }}</span>
+            </NuxtLink>
+            <button
+              v-if="item.status === 'pending' && new Date(item.service.startsAt).getTime() >= Date.now()"
+              type="button"
+              class="btn btn--secondary btn--xs task-detail-list__confirm"
+              :disabled="busy === item.assignmentId"
+              :aria-label="`Confirmar ${item.duty.name}, ${longDate(item.service.startsAt, tz)}`"
+              @click="respond(item, 'confirmed')"
+            >
+              Confirmar
+            </button>
+          </div>
         </nav>
       </section>
     </aside>
@@ -199,6 +227,32 @@ const history = computed(() => {
               :weight="2"
               style="width:18px;height:18px"
             />{{ location }}
+          </p>
+          <p
+            v-if="ownScriptBlock?.reference"
+            class="row soft"
+            style="gap:8px;margin-top:6px"
+          >
+            <Icon
+              name="book"
+              :weight="2"
+              style="width:18px;height:18px"
+            />Você lê <strong>{{ ownScriptBlock.reference }}</strong>
+            <NuxtLink
+              :to="link(`/roteiros/${task.service.id}`)"
+              class="link"
+            >abrir roteiro</NuxtLink>
+          </p>
+          <p
+            v-if="task.coworkers.length"
+            class="row soft"
+            style="gap:8px;margin-top:6px"
+          >
+            <Icon
+              name="people"
+              :weight="2"
+              style="width:18px;height:18px"
+            />Com você: <strong>{{ task.coworkers.map((p) => p.displayName).join(' e ') }}</strong>
           </p>
         </div>
 
