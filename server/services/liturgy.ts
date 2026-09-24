@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, ne, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, inArray, isNotNull, ne, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { getConfig } from '../config'
 import type { Db, DbOrTx } from '../db/client'
@@ -74,7 +74,19 @@ export async function listTemplates(db: Db, ctx: ChurchContext) {
   const counts = await db.select({ templateId: templateBlocks.templateId, n: sql<number>`count(*)::int` }).from(templateBlocks)
     .where(eq(templateBlocks.churchId, ctx.church.id)).groupBy(templateBlocks.templateId)
   const countOf = new Map(counts.map((c) => [c.templateId, c.n]))
-  return rows.map((t) => ({ ...t, blockCount: countOf.get(t.id) ?? 0 }))
+  const usage = await db.select({ templateId: serviceScripts.templateId, n: sql<number>`count(*)::int` }).from(serviceScripts)
+    .where(and(eq(serviceScripts.churchId, ctx.church.id), isNotNull(serviceScripts.templateId))).groupBy(serviceScripts.templateId)
+  const usedBy = new Map(usage.filter((item) => item.templateId).map((item) => [item.templateId!, item.n]))
+  const sourceRows = await db.select({ templateId: templateBlocks.templateId, source: templateBlocks.textSource }).from(templateBlocks)
+    .where(eq(templateBlocks.churchId, ctx.church.id)).groupBy(templateBlocks.templateId, templateBlocks.textSource)
+  const sources = new Map<string, Set<string>>()
+  for (const row of sourceRows) sources.set(row.templateId, (sources.get(row.templateId) ?? new Set()).add(row.source))
+  return rows.map((t) => ({
+    ...t,
+    blockCount: countOf.get(t.id) ?? 0,
+    usedInScripts: usedBy.get(t.id) ?? 0,
+    contentSources: [...(sources.get(t.id) ?? [])],
+  }))
 }
 
 export async function getTemplate(db: Db, ctx: ChurchContext, id: string) {

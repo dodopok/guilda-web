@@ -46,6 +46,22 @@ const filter = computed({
   set: (v: string) => router.replace({ query: v === 'todas' ? {} : { tipo: v } }),
 })
 const list = computed(() => (filter.value === 'todas' ? entries.value : entries.value.filter((e) => e.kind === filter.value)))
+const todayKey = localDateKey(new Date(), tz.value)
+const days = computed(() => {
+  const groups = new Map<string, typeof list.value>()
+  for (const entry of list.value) {
+    const key = localDateKey(entry.createdAt, tz.value)
+    groups.set(key, [...(groups.get(key) ?? []), entry])
+  }
+  return [...groups.entries()].map(([key, items]) => {
+    const sample = items[0]!
+    const weekday = weekdayLong(sample.createdAt, tz.value).replace('-feira', '')
+    const label = key === todayKey
+      ? `Hoje, ${weekday} ${dayNumber(sample.createdAt, tz.value)}`
+      : `${weekday}, ${dayNumber(sample.createdAt, tz.value)} de ${monthName(key.slice(0, 7)).toLowerCase()}`
+    return { key, label, items }
+  })
+})
 </script>
 
 <template>
@@ -72,34 +88,45 @@ const list = computed(() => (filter.value === 'todas' ? entries.value : entries.
         {{ l }} <span style="opacity:.7">{{ k === 'todas' ? entries.length : entries.filter((e) => e.kind === k).length }}</span>
       </button>
     </div>
-    <div class="card card--flush rows">
-      <div
-        v-for="e in list"
-        :key="e.id"
-        class="rowline"
-        style="flex-wrap:nowrap"
+    <div class="card card--flush">
+      <section
+        v-for="day in days"
+        :key="day.key"
+        class="audit-day"
       >
-        <span
-          style="width:36px;height:36px;border-radius:999px;display:grid;place-items:center;flex:none"
-          :style="{ background: META[e.kind].bg, color: META[e.kind].fg }"
-          aria-hidden="true"
-        ><Icon
-          :name="META[e.kind].icon"
-          :weight="2"
-          style="width:18px;height:18px"
-        /></span>
-        <span style="flex:1;min-width:0">
-          <span style="display:block;font-size:15px"><strong>{{ e.actorName ?? 'O sistema' }}</strong> {{ ACTIONS[e.action] ?? e.action }}</span>
-          <span
-            v-if="e.reason"
-            style="display:block;margin-top:6px;font-size:14px;color:#5c3a00;background:#fff1d6;border-radius:10px;padding:6px 10px"
-          >Motivo: “{{ e.reason }}”</span>
-          <span
-            class="muted"
-            style="display:block;font-size:13px;margin-top:3px"
-          >{{ stamp(e.createdAt, tz) }} · {{ META[e.kind].label }}</span>
-        </span>
-      </div>
+        <h2 class="caps audit-day__title">
+          {{ day.label }}
+        </h2>
+        <div class="rows">
+          <div
+            v-for="e in day.items"
+            :key="e.id"
+            class="rowline"
+            style="flex-wrap:nowrap"
+          >
+            <span
+              style="width:36px;height:36px;border-radius:999px;display:grid;place-items:center;flex:none"
+              :style="{ background: META[e.kind].bg, color: META[e.kind].fg }"
+              aria-hidden="true"
+            ><Icon
+              :name="META[e.kind].icon"
+              :weight="2"
+              style="width:18px;height:18px"
+            /></span>
+            <span style="flex:1;min-width:0">
+              <span style="display:block;font-size:15px"><strong>{{ e.actorName ?? 'O sistema' }}</strong> {{ ACTIONS[e.action] ?? e.action }}</span>
+              <span
+                v-if="e.reason"
+                style="display:block;margin-top:6px;font-size:14px;color:#5c3a00;background:#fff1d6;border-radius:10px;padding:6px 10px"
+              >Motivo: “{{ e.reason }}”</span>
+              <span
+                class="muted"
+                style="display:block;font-size:13px;margin-top:3px"
+              >{{ time(e.createdAt, tz) }} · {{ META[e.kind].label }}</span>
+            </span>
+          </div>
+        </div>
+      </section>
       <p
         v-if="!list.length"
         class="muted"

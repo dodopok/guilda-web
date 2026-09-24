@@ -7,7 +7,17 @@ const { capi, link, info, churchName, logoUrl, refreshInfo, prepMonth } = useChu
 const { me } = useSession()
 const toast = useToast()
 const step = ref(1)
+const setupLayout = ref<HTMLElement | null>(null)
+const setupReady = ref(false)
 const firstName = computed(() => (me.value?.account.displayName ?? '').split(' ')[0] ?? '')
+
+watch(step, async () => {
+  if (!setupReady.value) return
+  await nextTick()
+  if (typeof window !== 'undefined' && window.matchMedia('(max-width: 899px)').matches) {
+    setupLayout.value?.scrollIntoView({ block: 'start' })
+  }
+})
 
 // Passo 1: identidade
 const form = reactive({ name: info.value?.church.name ?? '', defaultLocation: info.value?.church.defaultLocation ?? '', accentColor: info.value?.church.accentColor ?? DEFAULT_ACCENT })
@@ -66,6 +76,7 @@ onMounted(async () => {
     identitySaved.value = Boolean(info.value?.church.name)
     step.value = !identitySaved.value ? 1 : !r.hasDuties ? 2 : 3
     await loadPeople()
+    setupReady.value = true
   } catch (e) {
     toast.error(e)
   }
@@ -204,6 +215,7 @@ async function finish(to: 'preparar' | 'mesa') {
 
 <template>
   <section
+    ref="setupLayout"
     class="setup-layout"
   >
     <header class="setup-heading">
@@ -248,7 +260,9 @@ async function finish(to: 'preparar' | 'mesa') {
         </button>
       </nav>
 
-      <section class="setup-current stack-lg">
+      <section
+        class="setup-current stack-lg"
+      >
         <div class="setup-current__top">
           <button
             v-if="step > 1"

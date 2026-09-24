@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Folha: sobe de baixo no celular e vira diálogo centralizado no computador. Usa <dialog>
 // nativo (foco preso, Esc fecha, título anunciado).
-const props = defineProps<{ open: boolean, title?: string, lede?: string, label?: string, placement?: 'center' | 'right', size?: 'default' | 'compact' }>()
+const props = defineProps<{ open: boolean, title?: string, lede?: string, label?: string, placement?: 'center' | 'right', panel?: boolean, size?: 'default' | 'compact' }>()
 const emit = defineEmits<{ (e: 'update:open', v: boolean): void, (e: 'close'): void }>()
 const el = ref<HTMLDialogElement>()
 const titleId = useId()
@@ -24,7 +24,7 @@ function onClose() {
   <dialog
     ref="el"
     class="sheet"
-    :class="{ 'sheet--right': placement === 'right', 'sheet--compact': size === 'compact' }"
+    :class="{ 'sheet--right': placement === 'right', 'sheet--panel': panel, 'sheet--compact': size === 'compact' }"
     :aria-labelledby="title ? titleId : undefined"
     :aria-label="!title ? label : undefined"
     @close="onClose"

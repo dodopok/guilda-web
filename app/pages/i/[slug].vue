@@ -98,12 +98,12 @@ const sidebarItems = computed(() => (isCoordinator.value
       { key: 'escala', to: link('/escala'), label: 'Escala da igreja', icon: 'calendar', badge: 0 },
       { key: 'roteiro', to: link('/roteiros'), label: 'Roteiro do culto', icon: 'book', badge: 0 },
     ]))
-const COORD = ['coord-home', 'preparar', 'pessoas', 'mensagens', 'configuracoes']
 const tabs = computed(() => (isCoordinator.value
   ? [
-      { key: 'inicio', to: link(''), label: 'Início', icon: 'home', badge: 0, on: current.value === 'inicio' },
-      { key: 'mesa', to: link('/coordenacao'), label: 'Coordenar', icon: 'sparkle', badge: attention.value, on: COORD.includes(current.value) },
+      { key: 'coord-home', to: link('/coordenacao'), label: 'Início', icon: 'home', badge: attention.value, on: ['coord-home', 'preparar', 'mensagens', 'configuracoes'].includes(current.value) },
       { key: 'escala', to: link('/escala'), label: 'Escala', icon: 'calendar', badge: 0, on: current.value === 'escala' },
+      { key: 'roteiro', to: link('/roteiros'), label: 'Roteiro', icon: 'book', badge: 0, on: current.value === 'roteiro' },
+      { key: 'pessoas', to: link('/coordenacao/pessoas'), label: 'Pessoas', icon: 'people', badge: 0, on: current.value === 'pessoas' },
       { key: 'voce', to: link('/perfil'), label: 'Você', icon: 'user', badge: 0, on: current.value === 'voce' },
     ]
   : [
@@ -183,7 +183,7 @@ const tabs = computed(() => (isCoordinator.value
       </NuxtLink>
       <NuxtLink
         v-if="memberships.length > 1"
-        to="/"
+        to="/?escolher=1"
         class="link link--muted"
         style="padding:10px 12px 0"
       >
@@ -193,7 +193,7 @@ const tabs = computed(() => (isCoordinator.value
     <div class="shell__col">
       <header class="mhead">
         <NuxtLink
-          :to="link('')"
+          :to="isCoordinator ? link('/coordenacao') : link('')"
           class="mhead__church"
         >
           <ChurchMark

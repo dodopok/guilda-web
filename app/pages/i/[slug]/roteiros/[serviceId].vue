@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import type { ScriptView, Song } from '~/types'
+import type { ScriptView, Song, Task } from '~/types'
 
 useHead({ title: 'Roteiro' })
 const route = useRoute()
 const serviceId = computed(() => String(route.params.serviceId))
-const { capi, tz, link, slug, isCoordinator, isPastor } = useChurch()
+const { capi, tz, link, slug, info, isCoordinator, isPastor } = useChurch()
+const { memberships } = useSession()
+const myName = computed(() => memberships.value.find((m) => m.slug === slug.value)?.displayName ?? '')
 const toast = useToast()
 
 const { data, refresh, error } = await useAsyncData(() => `script-${serviceId.value}`, () => capi<ScriptView>(`/scripts/${serviceId.value}`), { watch: [serviceId] })
@@ -64,6 +66,10 @@ const { data: others } = await useAsyncData(() => `script-others-${slug.value}-$
 }, { watch: [() => data.value?.service.localDate] })
 
 const content = computed(() => data.value?.published?.content ?? null)
+const { data: myTasks } = await useAsyncData(`script-my-tasks-${serviceId.value}`, () => capi<{ tasks: Task[] }>('/me/tasks?past=1').catch(() => ({ tasks: [] })), { watch: [serviceId] })
+const myTask = computed(() => myTasks.value?.tasks.find((task) => task.service.id === data.value?.service.id) ?? null)
+const myArrival = computed(() => myTask.value?.arrivalAt ? time(myTask.value.arrivalAt, tz.value) : null)
+const myLocation = computed(() => myTask.value?.service.location ?? info.value?.church.defaultLocation ?? null)
 const liturgy = computed(() => data.value?.draft?.liturgy ?? content.value?.liturgy ?? {})
 const eyebrow = computed(() => [liturgy.value.sundayName ?? liturgy.value.celebration, liturgy.value.season].filter(Boolean).join(' · '))
 const draftTag = computed(() => {
@@ -121,7 +127,7 @@ const exportBase = computed(() => `/api/v1/churches/${slug.value}/scripts/${serv
 </script>
 
 <template>
-  <section class="stack-md w-760">
+  <section class="stack-md script-page">
     <p
       v-if="error"
       class="panel panel--no"
@@ -171,6 +177,22 @@ const exportBase = computed(() => `/api/v1/churches/${slug.value}/scripts/${serv
           </template>
         </p>
       </div>
+      <p
+        v-if="data.published && !editor"
+        class="row no-print"
+        style="gap:6px 16px"
+      >
+        <a
+          :href="`${exportBase}?format=html`"
+          target="_blank"
+          rel="noopener"
+          class="link"
+        ><Icon name="print" />Imprimir</a>
+        <a
+          :href="`${exportBase}?format=txt`"
+          class="link"
+        ><Icon name="download" />Baixar em texto</a>
+      </p>
 
       <div
         v-if="editor && data.needsReview?.required"
@@ -307,6 +329,9 @@ const exportBase = computed(() => `/api/v1/churches/${slug.value}/scripts/${serv
         <ScriptReader
           v-if="content"
           :content="content"
+          :my-name="myName"
+          :arrival="myArrival"
+          :location="myLocation"
         />
         <div
           v-else
@@ -326,22 +351,6 @@ const exportBase = computed(() => `/api/v1/churches/${slug.value}/scripts/${serv
           </p>
         </div>
       </template>
-
-      <p
-        v-if="data.published && !editor"
-        class="row no-print"
-        style="gap:6px 16px"
-      >
-        <a
-          :href="`${exportBase}?format=html`"
-          target="_blank"
-          class="link"
-        ><Icon name="print" />Imprimir</a>
-        <a
-          :href="`${exportBase}?format=txt`"
-          class="link"
-        ><Icon name="download" />Baixar em texto</a>
-      </p>
     </template>
   </section>
 </template>

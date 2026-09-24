@@ -141,22 +141,14 @@ async function save() {
           Nenhuma música cadastrada ainda.
         </template>
       </div>
-    </div>
-
-    <section
-      v-if="hits.length"
-      aria-labelledby="cc-title"
-    >
-      <p
-        id="cc-title"
-        class="caps"
-      >
-        No Cifra Club
-      </p>
-      <div
-        class="card card--flush rows"
-        style="margin-top:6px"
-      >
+      <template v-if="hits.length">
+        <p
+          id="cc-title"
+          class="caps"
+          style="padding:12px 16px 4px;border-top:1px solid var(--line-2)"
+        >
+          No Cifra Club
+        </p>
         <button
           v-for="h in hits"
           :key="h.link"
@@ -178,9 +170,11 @@ async function save() {
           <span
             class="strong xsmall"
             style="color:var(--accent-deep)"
-          >Adicionar ao repertório</span>
+          >Adicionar</span>
         </button>
-      </div>
+      </template>
+    </div>
+    <section v-if="hits.length">
       <p
         class="xsmall muted"
         style="margin-top:6px"
@@ -199,6 +193,7 @@ async function save() {
     <Sheet
       v-model:open="open"
       placement="right"
+      panel
       :title="editing?.id ? 'Editar música' : 'Nova música'"
       lede="Sem letra — só o que ajuda o louvor a achar e tocar."
     >

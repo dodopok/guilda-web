@@ -73,6 +73,102 @@ function candidatesFor(s: EditorService, sl: EditorSlot) {
 }
 const curSlot = computed(() => cur.value?.slots.find((x) => x.id === curDuty.value) ?? null)
 const cands = computed(() => (cur.value && curSlot.value ? candidatesFor(cur.value, curSlot.value) : null))
+function suggestionFor(service: EditorService, slot: EditorSlot) {
+  return candidatesFor(service, slot).ok[0] ?? null
+}
+function chooseSlot(service: EditorService, slot: EditorSlot) {
+  curId.value = service.id
+  curDuty.value = slot.id
+}
+function assignInSlot(service: EditorService, slot: EditorSlot, personId: string) {
+  chooseSlot(service, slot)
+  void assign(personId, undefined, slot.id)
+}
+const bulkSuggestions = computed(() => {
+  const service = cur.value
+  if (!service) return []
+  const used = new Set(service.slots.flatMap((slot) => active(slot).map((a) => a.personId)))
+  const result: { slotId: string, personId: string, personName: string }[] = []
+  for (const slot of service.slots) {
+    const missing = Math.max(0, slot.requiredCount - active(slot).length)
+    for (let i = 0; i < missing; i++) {
+      const candidate = candidatesFor(service, slot).ok.find((person) => !used.has(person.id))
+      if (!candidate) break
+      result.push({ slotId: slot.id, personId: candidate.id, personName: candidate.name })
+      used.add(candidate.id)
+    }
+  }
+  return result
+})
+const monthSuggestions = computed(() => {
+  const planned = new Map<string, number>()
+  const plannedByDay = new Map<string, Set<string>>()
+  const result: { slotId: string, personId: string, personName: string }[] = []
+  for (const service of services.value) {
+    const used = new Set(service.slots.flatMap((slot) => active(slot).map((assignment) => assignment.personId)))
+    const dayUsed = plannedByDay.get(service.localDate) ?? new Set<string>()
+    for (const slot of service.slots) {
+      const missing = Math.max(0, slot.requiredCount - active(slot).length)
+      const options = candidatesFor(service, slot).ok
+      for (let i = 0; i < missing; i++) {
+        const candidate = options
+          .filter((person) => !used.has(person.id))
+          .sort((a, b) => (a.score + (planned.get(a.id) ?? 0) * 10 + (dayUsed.has(a.id) ? 15 : 0)) - (b.score + (planned.get(b.id) ?? 0) * 10 + (dayUsed.has(b.id) ? 15 : 0)) || a.name.localeCompare(b.name, 'pt-BR'))[0]
+        if (!candidate) break
+        result.push({ slotId: slot.id, personId: candidate.id, personName: candidate.name })
+        used.add(candidate.id)
+        dayUsed.add(candidate.id)
+        planned.set(candidate.id, (planned.get(candidate.id) ?? 0) + 1)
+      }
+    }
+    plannedByDay.set(service.localDate, dayUsed)
+  }
+  return result
+})
+const bulkBusy = ref(false)
+async function acceptSuggestions() {
+  const service = cur.value
+  const list = bulkSuggestions.value
+  if (!service || !list.length) return
+  bulkBusy.value = true
+  try {
+    for (const item of list) {
+      await capi(`/slots/${item.slotId}/assignments`, {
+        method: 'POST',
+        body: { personId: item.personId, notifyNow: props.editor.status === 'published' },
+      })
+    }
+    toast.ok(`${plural(list.length, 'sugestão aceita', 'sugestões aceitas')} para ${weekdayShort(service.startsAt, tz.value)} ${dayNumber(service.startsAt, tz.value)}.`)
+    emit('refresh')
+  } catch (e) {
+    toast.error(e)
+    emit('refresh')
+  } finally {
+    bulkBusy.value = false
+  }
+}
+async function acceptMonthSuggestions() {
+  const list = monthSuggestions.value
+  if (!list.length || bulkBusy.value || props.editor.status === 'published') return
+  bulkBusy.value = true
+  let accepted = 0
+  try {
+    for (const item of list) {
+      await capi(`/slots/${item.slotId}/assignments`, {
+        method: 'POST',
+        body: { personId: item.personId, notifyNow: false },
+      })
+      accepted++
+    }
+    toast.ok(`${plural(accepted, 'sugestão aceita', 'sugestões aceitas')} no rascunho de ${monthName(props.month)}.`)
+    emit('refresh')
+  } catch (e) {
+    toast.error(e, accepted ? `${accepted} sugestões aceitas; atualize o rascunho antes de continuar.` : undefined)
+    emit('refresh')
+  } finally {
+    bulkBusy.value = false
+  }
+}
 
 const busy = ref(false)
 async function assign(personId: string, reason?: { exceptionReason?: string, overrideUnavailableReason?: string }, slotId?: string) {
@@ -170,12 +266,110 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 </script>
 
 <template>
+  <section
+    class="prep-build-matrix-wrap"
+    aria-label="Escala do mês"
+  >
+    <div
+      class="row row--between"
+      style="gap:12px;margin-bottom:10px"
+    >
+      <div>
+        <p class="caps">
+          {{ cap(monthName(month)) }} · rascunho
+        </p>
+        <h2 style="font-size:20px;margin-top:3px">
+          O mês inteiro
+        </h2>
+      </div>
+      <button
+        v-if="monthSuggestions.length && editor.status !== 'published'"
+        type="button"
+        class="btn btn--md"
+        :disabled="bulkBusy"
+        @click="acceptMonthSuggestions"
+      >
+        <template v-if="bulkBusy">
+          Montando…
+        </template>
+        <template v-else>
+          Aceitar as {{ monthSuggestions.length }} sugestões do mês
+        </template>
+      </button>
+    </div>
+    <div class="scroll-x">
+      <table class="prep-build-matrix">
+        <thead>
+          <tr>
+            <th scope="col">
+              Função
+            </th>
+            <th
+              v-for="service in services"
+              :key="service.id"
+              scope="col"
+            >
+              <span>{{ weekdayShort(service.startsAt, tz) }}</span>
+              <strong>{{ dayNumber(service.startsAt, tz) }}</strong>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            v-for="duty in editor.duties.filter((d) => d.active)"
+            :key="duty.id"
+          >
+            <th scope="row">
+              {{ duty.name }}
+            </th>
+            <td
+              v-for="service in services"
+              :key="service.id"
+            >
+              <template v-if="service.slots.find((slot) => slot.dutyId === duty.id)">
+                <div class="prep-matrix-cell">
+                  <button
+                    type="button"
+                    class="prep-matrix-cell__select"
+                    :class="{ 'prep-matrix-cell__select--current': curId === service.id && curDuty === service.slots.find((slot) => slot.dutyId === duty.id)?.id }"
+                    @click="chooseSlot(service, service.slots.find((slot) => slot.dutyId === duty.id)!)"
+                  >
+                    <template v-if="active(service.slots.find((slot) => slot.dutyId === duty.id)!).length">
+                      {{ active(service.slots.find((slot) => slot.dutyId === duty.id)!).map((assignment) => assignment.personName.split(' ')[0]).join(', ') }}
+                    </template>
+                    <span
+                      v-else
+                      class="muted"
+                    >vaga aberta</span>
+                  </button>
+                  <button
+                    v-if="!isDone(service.slots.find((slot) => slot.dutyId === duty.id)!) && suggestionFor(service, service.slots.find((slot) => slot.dutyId === duty.id)!)"
+                    type="button"
+                    class="prep-matrix-cell__accept"
+                    :disabled="busy || bulkBusy"
+                    @click="assignInSlot(service, service.slots.find((slot) => slot.dutyId === duty.id)!, suggestionFor(service, service.slots.find((slot) => slot.dutyId === duty.id)!)!.id)"
+                  >
+                    Aceitar {{ suggestionFor(service, service.slots.find((slot) => slot.dutyId === duty.id)!)!.name.split(' ')[0] }}
+                  </button>
+                </div>
+              </template>
+              <span
+                v-else
+                class="prep-matrix-empty"
+              >—</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
   <div
-    class="row"
+    class="row prep-build-details"
     style="gap:20px;align-items:flex-start"
   >
     <div
-      class="stack-md"
+      class="stack-md prep-build-primary"
       style="flex:1 1 440px;min-width:0"
     >
       <p
@@ -253,6 +447,16 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
             />Não podem neste dia: <strong>{{ unavailableNames.join(', ') }}</strong>
           </p>
         </div>
+
+        <button
+          v-if="bulkSuggestions.length"
+          type="button"
+          class="btn prep-build-accept-all"
+          :disabled="bulkBusy"
+          @click="acceptSuggestions"
+        >
+          Aceitar {{ bulkSuggestions.length }} {{ bulkSuggestions.length === 1 ? 'sugestão' : 'sugestões' }} deste culto
+        </button>
 
         <div
           v-if="curDone"
@@ -359,6 +563,27 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
               </span>
             </div>
             <div
+              v-if="!isDone(sl) && sl.id !== curDuty && suggestionFor(cur, sl)"
+              class="prep-quick-assign"
+            >
+              <span class="grow"><strong>{{ suggestionFor(cur, sl)!.name }}</strong> · {{ suggestionFor(cur, sl)!.why }}</span>
+              <button
+                type="button"
+                class="btn btn--sm"
+                :disabled="busy || bulkBusy"
+                @click="assignInSlot(cur, sl, suggestionFor(cur, sl)!.id)"
+              >
+                Aceitar
+              </button>
+              <button
+                type="button"
+                class="link link--muted"
+                @click="curDuty = sl.id"
+              >
+                Outra
+              </button>
+            </div>
+            <div
               v-if="sl.id === curDuty && cands"
               style="padding:2px 14px 14px;border-top:1px solid var(--line-2)"
             >
@@ -447,7 +672,7 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
     </div>
 
     <aside
-      class="stack-md"
+      class="stack-md prep-build-summary"
       style="flex:1 1 240px;max-width:320px;min-width:0"
     >
       <div class="card">

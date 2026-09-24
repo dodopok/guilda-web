@@ -45,7 +45,8 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 <template>
   <section class="stack-lg">
     <div
-      class="row"
+      class="row prep-page-header"
+      :class="{ 'prep-page-header--build': step === 3 }"
       style="gap:12px"
     >
       <BackLink
@@ -58,6 +59,13 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
       >
         Preparar {{ monthName(month) }}
       </h1>
+      <NuxtLink
+        v-if="step === 3"
+        :to="{ path: route.path, query: { passo: '4' } }"
+        class="btn btn--sm prep-publish-corner"
+      >
+        Publicar
+      </NuxtLink>
       <nav
         class="row"
         style="gap:4px"
@@ -77,6 +85,7 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
     </div>
     <ol
       class="stepper"
+      :class="{ 'stepper--build': step === 3 }"
       aria-label="Passos"
     >
       <li
@@ -97,12 +106,23 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
       </li>
     </ol>
 
-    <PrepStepServices
+    <div
       v-if="step === 1"
-      :month="month"
-      @next="goAfterRefresh(2)"
-      @changed="refreshAll"
-    />
+      class="prep-step-one-grid"
+    >
+      <PrepStepServices
+        :month="month"
+        @next="goAfterRefresh(2)"
+        @changed="refreshAll"
+      />
+      <div class="prep-step-one-ask">
+        <PrepStepAsk
+          :month="month"
+          @next="go(3)"
+          @changed="refreshAvail"
+        />
+      </div>
+    </div>
     <PrepStepAsk
       v-else-if="step === 2"
       :month="month"

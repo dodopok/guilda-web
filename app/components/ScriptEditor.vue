@@ -373,8 +373,8 @@ async function saveDraft() {
 </script>
 
 <template>
-  <div class="stack-md">
-    <div class="panel--accent">
+  <div class="stack-md script-editor-layout">
+    <div class="panel--accent script-editor-todo">
       <svg
         viewBox="0 0 120 120"
         aria-hidden="true"
@@ -438,7 +438,7 @@ async function saveDraft() {
     </div>
 
     <ol
-      class="stack-sm"
+      class="stack-sm script-editor-blocks"
       style="list-style:none;margin:0;padding:0"
     >
       <li
@@ -947,7 +947,7 @@ async function saveDraft() {
 
     <div
       v-if="isPastor && !canPublish"
-      class="card"
+      class="card script-editor-note"
     >
       <h3 style="font-size:17px">
         Observação para a coordenação
@@ -968,7 +968,7 @@ async function saveDraft() {
     </div>
     <div
       v-else-if="view.draft?.pastoralNote"
-      class="panel panel--soft"
+      class="panel panel--soft script-editor-note"
     >
       <p class="strong small">
         Observação da pastoral
@@ -978,7 +978,7 @@ async function saveDraft() {
       </p>
     </div>
 
-    <div class="savebar">
+    <div class="savebar script-editor-savebar">
       <template v-if="view.published">
         <a
           :href="`${exportBase}?format=txt`"

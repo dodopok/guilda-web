@@ -190,7 +190,7 @@ const KIND: Record<string, string> = { special: 'especial', short: 'curto' }
         :disabled="!services.length"
         @click="emit('next')"
       >
-        Confirmar cultos e seguir<Icon
+        Confirmar e perguntar<Icon
           name="arrow-right"
           :weight="2.2"
         />

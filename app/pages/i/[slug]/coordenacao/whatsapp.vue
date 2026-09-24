@@ -25,6 +25,15 @@ interface Channel {
   encryptionReady: boolean
 }
 const { data, refresh } = await useAsyncData(`wa-${route.params.slug}`, () => capi<Channel>('/whatsapp'))
+const churchAddress = computed(() => import.meta.client ? `${window.location.origin}${link('')}` : link(''))
+async function copyChurchAddress() {
+  try {
+    await navigator.clipboard.writeText(churchAddress.value)
+    toast.ok('Endereço copiado.')
+  } catch {
+    toast.error('Não consegui copiar. Selecione e copie o endereço.')
+  }
+}
 
 const form = reactive({ mode: 'disabled' as Mode, number: '', businessAccountId: '', displayPhoneLast4: '', accessToken: '', appSecret: '', webhookVerifyToken: '', testMode: true, testRecipients: [] as string[] })
 const newNumber = ref('')
@@ -104,7 +113,36 @@ const checklist = computed(() => {
     { label: 'Autorizações registradas', sub: `${c.consents.granted} de ${c.consents.people} pessoas autorizaram`, done: c.consents.people > 0 && c.consents.granted === c.consents.people, action: 'Ver pessoas', to: link('/coordenacao/pessoas') },
   ]
 })
-const doneCount = computed(() => checklist.value.filter((c) => c.done).length)
+const officialSetupDone = computed(() => checklist.value.some((c) => c.label === 'Número verificado' && c.done) && checklist.value.some((c) => c.label === 'Webhook respondendo' && c.done))
+const templateStepDone = computed(() => {
+  const total = data.value?.templates.length ?? 0
+  return total > 0 && approved.value === total
+})
+const consentsReady = computed(() => Boolean(data.value?.consents.people) && data.value?.consents.granted === data.value?.consents.people)
+interface WaStep { n: number, title: string, sub: string, done: boolean }
+const waSteps = computed<WaStep[]>(() => [
+  { n: 1, title: 'Conectar a conta', sub: officialSetupDone.value ? 'Chave e webhook prontos' : 'Conta, chave e webhook', done: officialSetupDone.value },
+  { n: 2, title: 'Comprovar coexistência', sub: data.value?.coexistence.status === 'verified' ? 'O WhatsApp Business segue ativo' : 'O mesmo número continua no celular', done: data.value?.coexistence.status === 'verified' },
+  { n: 3, title: 'Aprovar os modelos', sub: `${approved.value} de ${data.value?.templates.length ?? 0} aprovados pela Meta`, done: templateStepDone.value },
+  { n: 4, title: 'Testar e ligar', sub: consentsReady.value ? 'Autorizações registradas' : `${data.value?.consents.granted ?? 0} de ${data.value?.consents.people ?? 0} autorizaram`, done: Boolean(data.value?.readiness.canSendReal && templateStepDone.value && consentsReady.value && !data.value?.testMode) },
+])
+const selectedStep = ref(0)
+const currentStep = computed(() => selectedStep.value || waSteps.value.find((item) => !item.done)?.n || 4)
+const doneCount = computed(() => waSteps.value.filter((item) => item.done).length)
+const maxReachableStep = computed(() => waSteps.value.find((item) => !item.done)?.n ?? 4)
+const canEnableReal = computed(() => Boolean(data.value?.readiness.canSendReal && templateStepDone.value && consentsReady.value))
+const enableBlocker = computed(() => {
+  if (!data.value?.readiness.realSendAllowedByServer) return 'O servidor ainda não liberou o envio real.'
+  if (!officialSetupDone.value) return 'Conclua a conta e o webhook primeiro.'
+  if (data.value?.coexistence.status !== 'verified') return 'Comprove que o WhatsApp Business continua funcionando no aparelho.'
+  if (!templateStepDone.value) return 'Aguarde a aprovação dos quatro modelos pela Meta.'
+  if (!consentsReady.value) return 'Registre a autorização de todas as pessoas com celular.'
+  return ''
+})
+function openStep(n: number) {
+  if (n > maxReachableStep.value) return
+  selectedStep.value = n
+}
 
 const coexNote = ref('')
 watch(data, (c) => (coexNote.value = c?.coexistence.note ?? ''), { immediate: true })
@@ -141,16 +179,26 @@ async function save() {
     toast.ok(form.accessToken || form.appSecret ? 'Salvo. As chaves ficam cifradas no servidor.' : 'Salvo.')
     if (info.value) info.value.whatsappMode = form.mode
     await refresh()
+    return true
   } catch (e) {
     toast.error(e)
+    return false
   } finally {
     saving.value = false
   }
 }
+async function saveAndNext() {
+  if (await save()) selectedStep.value = Math.min(4, currentStep.value + 1)
+}
+async function enableRealSending() {
+  if (!canEnableReal.value) return
+  form.testMode = false
+  if (await save()) toast.ok('Envios reais ligados.')
+}
 </script>
 
 <template>
-  <div class="stack-lg w-760">
+  <div class="stack-lg whatsapp-settings-page">
     <PageHead
       title="Canal do WhatsApp"
       lede="Por onde as mensagens da igreja saem."
@@ -158,439 +206,592 @@ async function save() {
       back-label="Configurações"
     />
     <template v-if="data">
-      <div class="panel--accent">
-        <p
-          class="caps"
-          style="color:inherit;opacity:.85;font-size:12px"
-        >
-          Agora
-        </p>
-        <h2 style="font-size:22px;margin-top:2px">
-          {{ headline.t }}
-        </h2>
-        <p style="margin-top:6px;opacity:.92;font-size:15px">
-          {{ headline.s }}
-        </p>
-      </div>
-
-      <div class="card">
-        <h2
-          id="wa-mode"
-          style="font-size:18px;margin-bottom:10px"
-        >
-          Modo
-        </h2>
-        <div
-          class="modegrid"
-          role="radiogroup"
-          aria-labelledby="wa-mode"
-        >
-          <button
-            v-for="m in MODES"
-            :key="m.id"
-            type="button"
-            role="radio"
-            class="modecard"
-            :aria-checked="form.mode === m.id"
-            @click="form.mode = m.id"
-          >
-            <span class="modecard__t">{{ m.label }}</span>
-            <span class="modecard__s">{{ m.sub }}</span>
-          </button>
-        </div>
-      </div>
-
-      <div
-        v-if="official"
-        class="card stack-md"
-      >
-        <h2 style="font-size:18px">
-          {{ meta ? 'Conta na Meta' : 'Conta na YCloud' }}
-        </h2>
-        <p
-          v-if="!data.encryptionReady"
-          class="panel panel--no small"
-        >
-          O servidor está sem SECRETS_ENCRYPTION_KEY: não dá para guardar chaves ainda.
-        </p>
-        <label class="field">
-          <span class="field__label">{{ meta ? 'Identificador do número (Phone number ID)' : 'Número da igreja' }}</span>
-          <input
-            v-if="meta"
-            v-model="form.number"
-            class="input"
-            inputmode="numeric"
-            autocomplete="off"
-            placeholder="Somente números"
-          >
-          <PhoneInput
-            v-else
-            v-model="form.number"
-            autocomplete="off"
-          />
-        </label>
-        <div class="fields-2">
-          <label class="field">
-            <span class="field__label">{{ meta ? 'Token de acesso' : 'Chave da API' }}</span>
-            <input
-              v-model="form.accessToken"
-              class="input"
-              type="password"
-              autocomplete="off"
-              :placeholder="data.hasAccessToken ? 'guardada — só para trocar' : 'cole aqui'"
-            >
-          </label>
-          <label class="field">
-            <span class="field__label">Segredo do webhook</span>
-            <input
-              v-model="form.appSecret"
-              class="input"
-              type="password"
-              autocomplete="off"
-              :placeholder="data.hasAppSecret ? 'guardado — só para trocar' : 'cole aqui'"
-            >
-          </label>
-        </div>
-        <details v-if="meta">
-          <summary class="link">
-            Mais campos da Meta
-          </summary>
-          <div
-            class="fields-2"
-            style="margin-top:8px"
-          >
-            <label class="field"><span class="field__label">WhatsApp Business Account ID</span><input
-              v-model="form.businessAccountId"
-              class="input"
-              inputmode="numeric"
-              autocomplete="off"
-            ></label>
-            <label class="field"><span class="field__label">Final do número (4 dígitos)</span><input
-              v-model="form.displayPhoneLast4"
-              class="input"
-              inputmode="numeric"
-              maxlength="4"
-            ></label>
-          </div>
-          <label
-            class="field"
-            style="margin-top:12px"
-          ><span class="field__label">Token de verificação do webhook</span><input
-            v-model="form.webhookVerifyToken"
-            class="input"
-            type="password"
-            autocomplete="off"
-            :placeholder="data.hasWebhookVerifyToken ? 'guardado — só para trocar' : 'invente um texto longo e use o mesmo na Meta'"
-          ></label>
-        </details>
-        <div>
-          <span class="field__label">Endereço do webhook — cole no painel {{ meta ? 'da Meta' : 'da YCloud' }}</span>
-          <div
-            class="row"
-            style="gap:8px"
-          >
-            <code
-              class="mono"
-              style="flex:1;min-width:200px;padding:12px 14px;border-radius:12px;background:var(--surface-2);word-break:break-all"
-            >{{ webhookUrl }}</code>
-            <button
-              type="button"
-              class="btn btn--secondary btn--sm"
-              style="min-height:44px"
-              @click="copy(webhookUrl)"
-            >
-              Copiar
-            </button>
-          </div>
-          <p
-            v-if="!meta"
-            class="field__hint"
-          >
-            Eventos: whatsapp.message.updated e whatsapp.inbound_message.received.
-          </p>
-        </div>
-        <SwitchRow
-          v-model="form.testMode"
-          title="Modo de teste"
-          sub="Só os números abaixo recebem."
-          boxed
-        />
-        <div
-          v-if="form.testMode"
-          class="row"
-          style="gap:6px"
-        >
-          <span
-            v-for="(n, i) in form.testRecipients"
-            :key="n"
-            class="row"
-            style="gap:6px;padding:5px 5px 5px 12px;border-radius:999px;background:var(--surface-4);font-weight:700;font-size:13.5px"
-          >{{ displayPhone(n) }}<button
-            type="button"
-            class="icon-btn icon-btn--round icon-btn--sm"
-            style="width:24px;height:24px;background:#fff"
-            :aria-label="`Tirar ${displayPhone(n)}`"
-            @click="form.testRecipients.splice(i, 1)"
-          ><Icon
-            name="x"
-            :weight="2.4"
-          /></button></span>
-          <PhoneInput
-            v-model="newNumber"
-            style="width:auto;flex:1 1 150px;min-height:40px;padding:8px 12px;font-size:14.5px"
-            aria-label="Novo número de teste"
-            @keydown.enter.prevent="addNumber"
-          />
-          <button
-            type="button"
-            class="btn btn--line btn--xs"
-            style="min-height:40px"
-            @click="addNumber"
-          >
-            Adicionar
-          </button>
-        </div>
-      </div>
-
-      <div class="card">
-        <div
-          class="row"
-          style="gap:10px"
-        >
-          <h2 style="font-size:18px;flex:1">
-            Para enviar de verdade
-          </h2>
-          <span
-            class="stag"
-            :style="doneCount === checklist.length ? { background: '#e3f3e8', color: '#155f30' } : { background: '#fff1d6', color: '#a86400' }"
-          >{{ doneCount === checklist.length ? 'pronto para ligar' : `${doneCount} de ${checklist.length}` }}</span>
-        </div>
-        <ul
-          style="list-style:none;margin:8px 0 0;padding:0"
-        >
-          <li
-            v-for="c in checklist"
-            :key="c.label"
-            class="row"
-            style="gap:12px;padding:10px 0;border-top:1px solid var(--line-2)"
-          >
-            <span
-              v-if="c.done"
-              style="width:26px;height:26px;border-radius:999px;background:var(--ok);color:#fff;display:grid;place-items:center;flex:none"
-            ><Icon
-              name="check"
-              :weight="2.6"
-              style="width:14px;height:14px"
-              label="feito"
-            /></span>
-            <span
-              v-else
-              style="width:26px;height:26px;border-radius:999px;border:2px solid var(--field);flex:none"
-            ><span class="sr-only">pendente</span></span>
-            <span style="flex:1;min-width:180px">
-              <span
-                class="strong"
-                style="display:block;font-weight:700"
-              >{{ c.label }}</span>
-              <span
-                class="muted"
-                style="display:block;font-size:13.5px"
-              >{{ c.sub }}</span>
-            </span>
-            <NuxtLink
-              v-if="c.action"
-              :to="c.to!"
-              class="link"
-              style="font-size:13.5px"
-            >{{ c.action }}</NuxtLink>
-          </li>
-        </ul>
-        <p
-          v-if="!data.readiness.realSendAllowedByServer"
-          class="small muted"
-          style="margin-top:6px"
-        >
-          Além disso, o servidor só libera envio real com WHATSAPP_ALLOW_REAL_SEND=true — hoje está desligado.
-        </p>
-      </div>
-
-      <div class="card stack-md">
-        <h2 style="font-size:18px">
-          Coexistência com o celular da igreja
-        </h2>
-        <p
-          class="soft"
-          style="font-size:14.5px;margin-top:-4px"
-        >
-          O mesmo número continua no aparelho. Registre como testaram.
-        </p>
-        <textarea
-          v-model="coexNote"
-          class="textarea"
-          style="min-height:84px;resize:vertical"
-          aria-label="Como testaram a coexistência"
-          placeholder="Ex.: 20/09 — mandamos “teste” pelo app e a resposta chegou no celular da secretaria."
-          :disabled="coexOk"
-        />
-        <SwitchRow
-          :model-value="coexOk"
-          title="Comprovado"
-          boxed
-          @update:model-value="toggleCoex"
-        >
-          <template #sub>
-            <span
-              v-if="coexOk"
-              class="small"
-              style="display:block;color:#155f30;font-weight:700"
-            >Registrado{{ data.coexistence.verifiedAt ? ` · ${stamp(data.coexistence.verifiedAt, tz)}` : '' }}</span>
-            <span
-              v-else
-              class="small muted"
-              style="display:block"
-            >Marque quando o teste funcionar.</span>
-          </template>
-        </SwitchRow>
-      </div>
-
-      <div class="card card--flush">
-        <div
-          class="row"
-          style="gap:10px;padding:16px 18px 8px"
-        >
-          <h2 style="font-size:18px;flex:1">
-            Modelos de mensagem
-          </h2>
-          <span
-            class="soft"
-            style="font-size:13.5px"
-          >{{ approved }} de {{ data.templates.length }} aprovados</span>
-        </div>
-        <div
-          v-for="t in data.templates"
-          :key="t.kind"
-        >
-          <button
-            type="button"
-            class="listrow"
-            style="border-top:1px solid var(--line-2)"
-            :aria-expanded="openTpl === t.kind"
-            @click="openTpl = openTpl === t.kind ? null : t.kind"
-          >
-            <span style="flex:1;min-width:0">
-              <span
-                class="strong"
-                style="display:block"
-              >{{ t.label }}</span>
-              <span
-                class="muted"
-                style="display:block;font-size:13px"
-              >{{ t.category === 'AUTHENTICATION' ? 'Autenticação · código de 6 dígitos' : `Utilidade · ${t.vars.map((x) => x.name).join(', ')}` }}</span>
-            </span>
-            <span
-              class="stag"
-              :style="{ background: TSTATUS[tplStatus[t.kind]!]?.bg, color: TSTATUS[tplStatus[t.kind]!]?.fg }"
-            >{{ TSTATUS[tplStatus[t.kind]!]?.label }}</span>
-            <Icon
-              :name="openTpl === t.kind ? 'chevron-up' : 'chevron-down'"
-              class="listrow__chev"
-            />
-          </button>
-          <div
-            v-if="openTpl === t.kind"
-            class="stack-sm"
-            style="padding:0 16px 14px"
-          >
-            <div
-              class="bubble"
-              style="background:#e7f6e4;border-radius:18px 18px 18px 4px;max-width:none;white-space:pre-wrap"
-            >
-              {{ t.body }}
-            </div>
-            <p
-              v-if="tplStatus[t.kind] === 'rejected'"
-              style="font-size:13.5px;color:#8f2a1e;font-weight:700"
-            >
-              A Meta rejeitou este modelo. Confira categoria e variáveis acima e envie de novo com o texto atual.
-            </p>
-            <dl class="tplmeta">
-              <dt>Nome</dt>
-              <dd><code class="mono">{{ t.name }}</code></dd>
-              <dt>Categoria</dt>
-              <dd>{{ t.category === 'AUTHENTICATION' ? 'Autenticação (Authentication)' : 'Utilidade (Utility)' }}</dd>
-              <dt>Idioma</dt>
-              <dd>Português (BR) · pt_BR</dd>
-            </dl>
-            <template v-if="t.category === 'AUTHENTICATION'">
-              <p class="small">
-                No YCloud, escolha <strong>Authentication</strong> e o tipo de código <strong>Copy code</strong>. O texto é o padrão da Meta: não tem link nem variável para escrever. Marque <strong>Add security recommendation</strong> e <strong>Code expiration</strong> com {{ t.codeExpirationMinutes }} minutos. Exemplo de código: <code class="mono">{{ t.vars[0]?.example }}</code>.
-              </p>
-            </template>
-            <template v-else>
-              <p class="small">
-                Tipo de variável <strong>nome</strong> (não número). Cadastre cada uma com o exemplo:
-              </p>
-              <table class="tplvars">
-                <thead>
-                  <tr>
-                    <th scope="col">
-                      Variável
-                    </th>
-                    <th scope="col">
-                      Exemplo
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr
-                    v-for="x in t.vars"
-                    :key="x.name"
-                  >
-                    <td><code class="mono">{{ x.name }}</code><span class="muted"> · {{ x.label }}</span></td>
-                    <td>{{ x.example }}</td>
-                  </tr>
-                </tbody>
-              </table>
-              <button
-                type="button"
-                class="link"
-                style="font-size:13.5px;align-self:flex-start"
-                @click="copy(t.body)"
-              >
-                Copiar texto do corpo
-              </button>
-            </template>
-            <div
-              class="chips"
-              role="radiogroup"
-              :aria-label="`Situação de ${t.label}`"
-            >
-              <button
-                v-for="(s, k) in TSTATUS"
-                :key="k"
-                type="button"
-                role="radio"
-                class="chip"
-                :aria-checked="tplStatus[t.kind] === k"
-                :aria-pressed="tplStatus[t.kind] === k"
-                @click="tplStatus[t.kind] = k"
-              >
-                {{ s.label }}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="savebar">
+      <div class="row settings-address">
+        <span class="ticon"><Icon
+          name="external"
+          :weight="2"
+        /></span>
+        <span class="grow"><strong>Endereço da igreja</strong><code>{{ churchAddress }}</code></span>
         <button
           type="button"
-          class="btn btn--float"
-          :disabled="saving"
-          @click="save"
+          class="btn btn--line btn--xs"
+          @click="copyChurchAddress"
         >
-          Salvar
+          Copiar
         </button>
+      </div>
+      <div class="whatsapp-settings-layout">
+        <aside
+          class="whatsapp-settings-nav"
+          aria-label="Configurações da igreja"
+        >
+          <section class="card card--flush">
+            <p class="settings-section-title">
+              Configurações
+            </p>
+            <NuxtLink
+              :to="link('/coordenacao/configuracoes?editar=identity')"
+              class="listrow"
+            >
+              <span class="ticon"><Icon name="home" /></span>
+              <span class="grow"><strong class="settings-row__title">Identidade e endereço</strong><span class="settings-row__sub">Nome, local, fuso e cor</span></span>
+              <Icon
+                name="chevron-right"
+                class="listrow__chev"
+              />
+            </NuxtLink>
+            <NuxtLink
+              :to="link('/coordenacao/whatsapp')"
+              class="listrow settings-nav-row--active"
+              aria-current="page"
+            >
+              <span class="ticon"><Icon name="send" /></span>
+              <span class="grow"><strong class="settings-row__title">WhatsApp da igreja</strong><span class="settings-row__sub">Canal e mensagens</span></span>
+              <Icon
+                name="chevron-right"
+                class="listrow__chev"
+              />
+            </NuxtLink>
+            <NuxtLink
+              :to="link('/coordenacao/configuracoes?editar=reminder')"
+              class="listrow"
+            >
+              <span class="ticon"><Icon name="clock" /></span>
+              <span class="grow"><strong class="settings-row__title">Lembrete semanal</strong><span class="settings-row__sub">Dia, hora e prazo de resposta</span></span>
+              <Icon
+                name="chevron-right"
+                class="listrow__chev"
+              />
+            </NuxtLink>
+            <NuxtLink
+              :to="link('/coordenacao/configuracoes?editar=liturgy')"
+              class="listrow"
+            >
+              <span class="ticon"><Icon name="book" /></span>
+              <span class="grow"><strong class="settings-row__title">Liturgia</strong><span class="settings-row__sub">Livro e leituras</span></span>
+              <Icon
+                name="chevron-right"
+                class="listrow__chev"
+              />
+            </NuxtLink>
+            <NuxtLink
+              :to="link('/coordenacao/modelos')"
+              class="listrow"
+            >
+              <span class="ticon"><Icon name="book" /></span>
+              <span class="grow"><strong class="settings-row__title">Modelos de liturgia</strong><span class="settings-row__sub">Ordem dos blocos</span></span>
+              <Icon
+                name="chevron-right"
+                class="listrow__chev"
+              />
+            </NuxtLink>
+          </section>
+          <section class="card card--flush">
+            <p class="settings-section-title">
+              Mais ferramentas
+            </p>
+            <ToolLink
+              :to="link('/coordenacao/mensagens')"
+              icon="message"
+              label="Mensagens enviadas"
+            />
+            <ToolLink
+              :to="link('/coordenacao/repertorio')"
+              icon="music"
+              label="Repertório"
+            />
+            <ToolLink
+              :to="link('/coordenacao/importar')"
+              icon="upload"
+              label="Importar planilha"
+            />
+            <ToolLink
+              :to="link('/coordenacao/historico')"
+              icon="clock"
+              label="Histórico"
+            />
+          </section>
+        </aside>
+
+        <main class="whatsapp-settings-content">
+          <div class="panel--accent">
+            <p
+              class="caps"
+              style="color:inherit;opacity:.85;font-size:12px"
+            >
+              Agora
+            </p>
+            <h2 style="font-size:22px;margin-top:2px">
+              {{ headline.t }}
+            </h2>
+            <p style="margin-top:6px;opacity:.92;font-size:15px">
+              {{ headline.s }}
+            </p>
+          </div>
+          <p class="small muted wa-step-count">
+            {{ doneCount }} de 4 passos feitos
+          </p>
+
+          <nav
+            class="wa-steps"
+            aria-label="Passos para ligar o WhatsApp"
+          >
+            <button
+              v-for="item in waSteps"
+              :key="item.n"
+              type="button"
+              class="wa-steps__item"
+              :class="{ 'wa-steps__item--current': currentStep === item.n, 'wa-steps__item--done': item.done }"
+              :aria-current="currentStep === item.n ? 'step' : undefined"
+              :disabled="item.n > maxReachableStep"
+              @click="openStep(item.n)"
+            >
+              <span class="wa-steps__number"><Icon
+                v-if="item.done"
+                name="check"
+                :weight="2.6"
+              /><template v-else>{{ item.n }}</template></span>
+              <span class="wa-steps__copy"><strong>{{ item.title }}</strong><small>{{ item.sub }}</small></span>
+            </button>
+          </nav>
+
+          <div
+            v-if="currentStep === 1"
+            class="card"
+          >
+            <h2
+              id="wa-mode"
+              style="font-size:18px;margin-bottom:10px"
+            >
+              Modo
+            </h2>
+            <div
+              class="modegrid"
+              role="radiogroup"
+              aria-labelledby="wa-mode"
+            >
+              <button
+                v-for="m in MODES"
+                :key="m.id"
+                type="button"
+                role="radio"
+                class="modecard"
+                :aria-checked="form.mode === m.id"
+                @click="form.mode = m.id"
+              >
+                <span class="modecard__t">{{ m.label }}</span>
+                <span class="modecard__s">{{ m.sub }}</span>
+              </button>
+            </div>
+          </div>
+
+          <div
+            v-if="official && currentStep === 1"
+            class="card stack-md"
+          >
+            <h2 style="font-size:18px">
+              {{ meta ? 'Conta na Meta' : 'Conta na YCloud' }}
+            </h2>
+            <p
+              v-if="!data.encryptionReady"
+              class="panel panel--no small"
+            >
+              O servidor está sem SECRETS_ENCRYPTION_KEY: não dá para guardar chaves ainda.
+            </p>
+            <label class="field">
+              <span class="field__label">{{ meta ? 'Identificador do número (Phone number ID)' : 'Número da igreja' }}</span>
+              <input
+                v-if="meta"
+                v-model="form.number"
+                class="input"
+                inputmode="numeric"
+                autocomplete="off"
+                placeholder="Somente números"
+              >
+              <PhoneInput
+                v-else
+                v-model="form.number"
+                autocomplete="off"
+              />
+            </label>
+            <div class="fields-2">
+              <label class="field">
+                <span class="field__label">{{ meta ? 'Token de acesso' : 'Chave da API' }}</span>
+                <input
+                  v-model="form.accessToken"
+                  class="input"
+                  type="password"
+                  autocomplete="off"
+                  :placeholder="data.hasAccessToken ? 'guardada — só para trocar' : 'cole aqui'"
+                >
+              </label>
+              <label class="field">
+                <span class="field__label">Segredo do webhook</span>
+                <input
+                  v-model="form.appSecret"
+                  class="input"
+                  type="password"
+                  autocomplete="off"
+                  :placeholder="data.hasAppSecret ? 'guardado — só para trocar' : 'cole aqui'"
+                >
+              </label>
+            </div>
+            <details v-if="meta">
+              <summary class="link">
+                Mais campos da Meta
+              </summary>
+              <div
+                class="fields-2"
+                style="margin-top:8px"
+              >
+                <label class="field"><span class="field__label">WhatsApp Business Account ID</span><input
+                  v-model="form.businessAccountId"
+                  class="input"
+                  inputmode="numeric"
+                  autocomplete="off"
+                ></label>
+                <label class="field"><span class="field__label">Final do número (4 dígitos)</span><input
+                  v-model="form.displayPhoneLast4"
+                  class="input"
+                  inputmode="numeric"
+                  maxlength="4"
+                ></label>
+              </div>
+              <label
+                class="field"
+                style="margin-top:12px"
+              ><span class="field__label">Token de verificação do webhook</span><input
+                v-model="form.webhookVerifyToken"
+                class="input"
+                type="password"
+                autocomplete="off"
+                :placeholder="data.hasWebhookVerifyToken ? 'guardado — só para trocar' : 'invente um texto longo e use o mesmo na Meta'"
+              ></label>
+            </details>
+            <div>
+              <span class="field__label">Endereço do webhook — cole no painel {{ meta ? 'da Meta' : 'da YCloud' }}</span>
+              <div
+                class="row"
+                style="gap:8px"
+              >
+                <code
+                  class="mono"
+                  style="flex:1;min-width:200px;padding:12px 14px;border-radius:12px;background:var(--surface-2);word-break:break-all"
+                >{{ webhookUrl }}</code>
+                <button
+                  type="button"
+                  class="btn btn--secondary btn--sm"
+                  style="min-height:44px"
+                  @click="copy(webhookUrl)"
+                >
+                  Copiar
+                </button>
+              </div>
+              <p
+                v-if="!meta"
+                class="field__hint"
+              >
+                Eventos: whatsapp.message.updated e whatsapp.inbound_message.received.
+              </p>
+            </div>
+            <SwitchRow
+              v-model="form.testMode"
+              title="Modo de teste"
+              sub="Só os números abaixo recebem."
+              boxed
+            />
+            <div
+              v-if="form.testMode"
+              class="row"
+              style="gap:6px"
+            >
+              <span
+                v-for="(n, i) in form.testRecipients"
+                :key="n"
+                class="row"
+                style="gap:6px;padding:5px 5px 5px 12px;border-radius:999px;background:var(--surface-4);font-weight:700;font-size:13.5px"
+              >{{ displayPhone(n) }}<button
+                type="button"
+                class="icon-btn icon-btn--round icon-btn--sm"
+                style="width:24px;height:24px;background:#fff"
+                :aria-label="`Tirar ${displayPhone(n)}`"
+                @click="form.testRecipients.splice(i, 1)"
+              ><Icon
+                name="x"
+                :weight="2.4"
+              /></button></span>
+              <PhoneInput
+                v-model="newNumber"
+                style="width:auto;flex:1 1 150px;min-height:40px;padding:8px 12px;font-size:14.5px"
+                aria-label="Novo número de teste"
+                @keydown.enter.prevent="addNumber"
+              />
+              <button
+                type="button"
+                class="btn btn--line btn--xs"
+                style="min-height:40px"
+                @click="addNumber"
+              >
+                Adicionar
+              </button>
+            </div>
+          </div>
+
+          <div
+            v-if="currentStep === 2"
+            class="card stack-md"
+          >
+            <h2 style="font-size:18px">
+              Coexistência com o celular da igreja
+            </h2>
+            <p
+              class="soft"
+              style="font-size:14.5px;margin-top:-4px"
+            >
+              O mesmo número continua no aparelho. Registre como testaram.
+            </p>
+            <textarea
+              v-model="coexNote"
+              class="textarea"
+              style="min-height:84px;resize:vertical"
+              aria-label="Como testaram a coexistência"
+              placeholder="Ex.: 20/09 — mandamos “teste” pelo app e a resposta chegou no celular da secretaria."
+              :disabled="coexOk"
+            />
+            <SwitchRow
+              :model-value="coexOk"
+              title="Comprovado"
+              boxed
+              @update:model-value="toggleCoex"
+            >
+              <template #sub>
+                <span
+                  v-if="coexOk"
+                  class="small"
+                  style="display:block;color:#155f30;font-weight:700"
+                >Registrado{{ data.coexistence.verifiedAt ? ` · ${stamp(data.coexistence.verifiedAt, tz)}` : '' }}</span>
+                <span
+                  v-else
+                  class="small muted"
+                  style="display:block"
+                >Marque quando o teste funcionar.</span>
+              </template>
+            </SwitchRow>
+            <button
+              v-if="coexOk"
+              type="button"
+              class="btn btn--block"
+              @click="selectedStep = 3"
+            >
+              Continuar para os modelos<Icon
+                name="arrow-right"
+                :weight="2.2"
+              />
+            </button>
+          </div>
+
+          <div
+            v-if="currentStep === 3"
+            class="card card--flush"
+          >
+            <div
+              class="row"
+              style="gap:10px;padding:16px 18px 8px"
+            >
+              <h2 style="font-size:18px;flex:1">
+                Modelos de mensagem
+              </h2>
+              <span
+                class="soft"
+                style="font-size:13.5px"
+              >{{ approved }} de {{ data.templates.length }} aprovados</span>
+            </div>
+            <div
+              v-for="t in data.templates"
+              :key="t.kind"
+            >
+              <button
+                type="button"
+                class="listrow"
+                style="border-top:1px solid var(--line-2)"
+                :aria-expanded="openTpl === t.kind"
+                @click="openTpl = openTpl === t.kind ? null : t.kind"
+              >
+                <span style="flex:1;min-width:0">
+                  <span
+                    class="strong"
+                    style="display:block"
+                  >{{ t.label }}</span>
+                  <span
+                    class="muted"
+                    style="display:block;font-size:13px"
+                  >{{ t.category === 'AUTHENTICATION' ? 'Autenticação · código de 6 dígitos' : `Utilidade · ${t.vars.map((x) => x.name).join(', ')}` }}</span>
+                </span>
+                <span
+                  class="stag"
+                  :style="{ background: TSTATUS[tplStatus[t.kind]!]?.bg, color: TSTATUS[tplStatus[t.kind]!]?.fg }"
+                >{{ TSTATUS[tplStatus[t.kind]!]?.label }}</span>
+                <Icon
+                  :name="openTpl === t.kind ? 'chevron-up' : 'chevron-down'"
+                  class="listrow__chev"
+                />
+              </button>
+              <div
+                v-if="openTpl === t.kind"
+                class="stack-sm"
+                style="padding:0 16px 14px"
+              >
+                <div
+                  class="bubble"
+                  style="background:#e7f6e4;border-radius:18px 18px 18px 4px;max-width:none;white-space:pre-wrap"
+                >
+                  {{ t.body }}
+                </div>
+                <p
+                  v-if="tplStatus[t.kind] === 'rejected'"
+                  style="font-size:13.5px;color:#8f2a1e;font-weight:700"
+                >
+                  A Meta rejeitou este modelo. Confira categoria e variáveis acima e envie de novo com o texto atual.
+                </p>
+                <dl class="tplmeta">
+                  <dt>Nome</dt>
+                  <dd><code class="mono">{{ t.name }}</code></dd>
+                  <dt>Categoria</dt>
+                  <dd>{{ t.category === 'AUTHENTICATION' ? 'Autenticação (Authentication)' : 'Utilidade (Utility)' }}</dd>
+                  <dt>Idioma</dt>
+                  <dd>Português (BR) · pt_BR</dd>
+                </dl>
+                <template v-if="t.category === 'AUTHENTICATION'">
+                  <p class="small">
+                    No YCloud, escolha <strong>Authentication</strong> e o tipo de código <strong>Copy code</strong>. O texto é o padrão da Meta: não tem link nem variável para escrever. Marque <strong>Add security recommendation</strong> e <strong>Code expiration</strong> com {{ t.codeExpirationMinutes }} minutos. Exemplo de código: <code class="mono">{{ t.vars[0]?.example }}</code>.
+                  </p>
+                </template>
+                <template v-else>
+                  <p class="small">
+                    Tipo de variável <strong>nome</strong> (não número). Cadastre cada uma com o exemplo:
+                  </p>
+                  <table class="tplvars">
+                    <thead>
+                      <tr>
+                        <th scope="col">
+                          Variável
+                        </th>
+                        <th scope="col">
+                          Exemplo
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr
+                        v-for="x in t.vars"
+                        :key="x.name"
+                      >
+                        <td><code class="mono">{{ x.name }}</code><span class="muted"> · {{ x.label }}</span></td>
+                        <td>{{ x.example }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <button
+                    type="button"
+                    class="link"
+                    style="font-size:13.5px;align-self:flex-start"
+                    @click="copy(t.body)"
+                  >
+                    Copiar texto do corpo
+                  </button>
+                </template>
+                <div
+                  class="chips"
+                  role="radiogroup"
+                  :aria-label="`Situação de ${t.label}`"
+                >
+                  <button
+                    v-for="(s, k) in TSTATUS"
+                    :key="k"
+                    type="button"
+                    role="radio"
+                    class="chip"
+                    :aria-checked="tplStatus[t.kind] === k"
+                    :aria-pressed="tplStatus[t.kind] === k"
+                    @click="tplStatus[t.kind] = k"
+                  >
+                    {{ s.label }}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div
+            v-if="currentStep === 4"
+            class="card stack-md"
+          >
+            <div>
+              <h2 style="font-size:18px">
+                Testar e ligar os envios reais
+              </h2>
+              <p
+                class="soft"
+                style="margin-top:5px"
+              >
+                Só ligue depois que o teste chegar no WhatsApp Business e os modelos estiverem aprovados.
+              </p>
+            </div>
+            <div class="card card--flush rows">
+              <div
+                v-for="item in checklist"
+                :key="item.label"
+                class="rowline rowline--center"
+              >
+                <span
+                  class="wa-check"
+                  :class="{ 'wa-check--done': item.done }"
+                ><Icon
+                  v-if="item.done"
+                  name="check"
+                  :weight="2.6"
+                /></span>
+                <span class="grow"><strong style="display:block">{{ item.label }}</strong><small class="muted">{{ item.sub }}</small></span>
+                <NuxtLink
+                  v-if="item.action"
+                  :to="item.to!"
+                  class="link"
+                >{{ item.action }}</NuxtLink>
+              </div>
+            </div>
+            <p
+              v-if="enableBlocker"
+              class="panel panel--wait small"
+            >
+              {{ enableBlocker }}
+            </p>
+            <button
+              type="button"
+              class="btn btn--block"
+              :disabled="saving || !canEnableReal || !form.testMode"
+              @click="enableRealSending"
+            >
+              {{ saving ? 'Salvando…' : form.testMode ? 'Ligar envios reais' : 'Envios reais ligados' }}
+            </button>
+          </div>
+
+          <div
+            v-if="currentStep === 1 || currentStep === 3"
+            class="savebar"
+          >
+            <button
+              type="button"
+              class="btn btn--float"
+              :disabled="saving"
+              @click="saveAndNext"
+            >
+              {{ saving ? 'Salvando…' : currentStep === 1 ? 'Salvar e continuar' : 'Salvar modelos e continuar' }}<Icon
+                name="arrow-right"
+                :weight="2.2"
+              />
+            </button>
+          </div>
+        </main>
       </div>
     </template>
   </div>

@@ -280,21 +280,37 @@ async function doSave(apply: boolean) {
       </nav>
     </aside>
     <div class="template-edit-main stack-md w-760">
-      <div>
-        <BackLink
-          class="template-edit-back"
-          :to="link('/coordenacao/modelos')"
-          label="Modelos"
-        />
-        <input
-          v-model="form.name"
-          class="title-input"
-          aria-label="Nome do modelo"
-          maxlength="120"
-        >
-        <p class="lede">
-          A ordem do culto. Arraste pela alça para mudar a ordem; toque no bloco para editar.
-        </p>
+      <div class="template-edit-heading">
+        <div class="template-edit-heading__copy">
+          <BackLink
+            class="template-edit-back"
+            :to="link('/coordenacao/modelos')"
+            label="Modelos"
+          />
+          <input
+            v-model="form.name"
+            class="title-input"
+            aria-label="Nome do modelo"
+            maxlength="120"
+          >
+          <p class="lede">
+            A ordem do culto. Arraste pela alça para mudar a ordem; toque no bloco para editar.
+          </p>
+        </div>
+        <div class="template-edit-save">
+          <span
+            v-if="dirty"
+            class="small muted"
+          >Alterações não salvas</span>
+          <button
+            type="button"
+            class="btn btn--md"
+            :disabled="saving"
+            @click="save"
+          >
+            {{ saving ? 'Salvando…' : 'Salvar' }}
+          </button>
+        </div>
       </div>
 
       <div
@@ -581,7 +597,7 @@ async function doSave(apply: boolean) {
         />Acrescentar bloco
       </button>
 
-      <div class="savebar">
+      <div class="savebar template-savebar">
         <span
           v-if="dirty"
           class="small muted"

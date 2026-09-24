@@ -145,6 +145,8 @@ async function saveRecord() {
 }
 const pct = computed(() => (data.value?.summary.people ? Math.round((data.value.summary.responded / data.value.summary.people) * 100) : 0))
 const deadlineText = (iso: string) => `${weekdayLong(iso, tz.value).replace('-feira', '')}, ${dayMonth(iso, tz.value)}, ${time(iso, tz.value)}`
+const deadlinePreview = computed(() => form.deadlineDate && form.deadlineTime ? deadlineText(zonedToIso(form.deadlineDate, form.deadlineTime, tz.value)) : 'Escolha um prazo')
+const sendPreview = computed(() => form.sendDate && form.sendTime ? `${weekdayLong(zonedToIso(form.sendDate, form.sendTime, tz.value), tz.value).replace('-feira', '')}, ${dayMonth(zonedToIso(form.sendDate, form.sendTime, tz.value), tz.value)}, ${time(zonedToIso(form.sendDate, form.sendTime, tz.value), tz.value)}` : 'amanhã, 10h')
 </script>
 
 <template>
@@ -153,142 +155,139 @@ const deadlineText = (iso: string) => `${weekdayLong(iso, tz.value).replace('-fe
     class="stack-md w-720"
   >
     <template v-if="state === 'none'">
-      <div>
-        <h2 class="h2">
-          Pergunte quem não pode em {{ monthName(month) }}
-        </h2>
-        <p class="lede">
-          Cada pessoa recebe uma mensagem com um link e marca os cultos em que não pode. Silêncio não conta como “pode”.
-        </p>
-      </div>
-      <div class="card">
-        <p
-          class="muted strong xsmall"
-          style="margin-bottom:10px"
-        >
-          A mensagem que cada pessoa recebe
-        </p>
-        <p class="bubble">
-          {{ preview }}
-        </p>
-      </div>
-      <div class="grid-auto">
-        <div class="card">
-          <p
-            class="strong"
-            style="margin-bottom:8px"
-          >
-            Enviar em
-          </p>
-          <div
-            class="row"
-            style="flex-wrap:nowrap;gap:8px"
-          >
-            <input
-              v-model="form.sendDate"
-              type="date"
-              class="input input--sm grow"
-              aria-label="Dia do envio"
+      <div class="prep-ask-layout">
+        <div class="stack-md prep-ask-message">
+          <div>
+            <h2 class="h2">
+              Perguntar quem não pode em {{ monthName(month) }}
+            </h2>
+            <p class="lede">
+              Cada pessoa recebe uma mensagem com um link e marca os cultos em que não pode. Silêncio não conta como “pode”.
+            </p>
+          </div>
+          <div class="card">
+            <p
+              class="muted strong xsmall"
+              style="margin-bottom:10px"
             >
-            <input
-              v-model="form.sendTime"
-              type="time"
-              class="input input--sm"
-              style="width:104px"
-              aria-label="Hora do envio"
+              Cada pessoa recebe
+            </p>
+            <p class="bubble">
+              {{ preview }}
+            </p>
+          </div>
+          <div class="panel panel--soft">
+            <p class="strong">
+              {{ plural(withWa.length, 'pessoa recebe', 'pessoas recebem') }} pelo WhatsApp
+            </p>
+            <p
+              v-if="withoutWa.length"
+              style="margin-top:4px;color:var(--ink-2);font-size:14.5px"
             >
+              <strong>{{ withoutWa.length }} sem WhatsApp:</strong> {{ withoutWa.map((p) => p.displayName).join(', ') }}. Pergunte pessoalmente e registre a resposta depois.
+            </p>
           </div>
           <p
             v-if="earlyHint"
-            class="muted"
-            style="margin-top:8px;font-size:13.5px"
+            class="small muted"
           >
             {{ earlyHint }}
           </p>
         </div>
-        <div class="card">
-          <p
-            class="strong"
-            style="margin-bottom:8px"
-          >
-            Prazo para responder
-          </p>
+
+        <div class="card prep-ask-actions">
           <div
-            class="row"
-            style="flex-wrap:nowrap;gap:8px"
+            class="row row--between"
+            style="align-items:flex-start"
           >
-            <input
+            <div>
+              <p class="caps">
+                Prazo para responder
+              </p>
+              <p
+                class="strong"
+                style="margin-top:4px"
+              >
+                {{ deadlinePreview }}
+              </p>
+            </div>
+            <button
+              type="button"
+              class="link"
+              :aria-expanded="editing"
+              @click="editing = !editing"
+            >
+              {{ editing ? 'Fechar' : 'Editar' }}
+            </button>
+          </div>
+          <div
+            v-if="editing"
+            class="row"
+            style="flex-wrap:nowrap;gap:8px;margin-top:12px"
+          >
+            <label class="field grow"><span class="field__label">Dia</span><input
               v-model="form.deadlineDate"
               type="date"
-              class="input input--sm grow"
+              class="input input--sm"
               aria-label="Dia do prazo"
-            >
-            <input
+            ></label>
+            <label
+              class="field"
+              style="width:110px"
+            ><span class="field__label">Hora</span><input
               v-model="form.deadlineTime"
               type="time"
               class="input input--sm"
-              style="width:104px"
               aria-label="Hora do prazo"
-            >
+            ></label>
           </div>
           <p
-            class="muted"
-            style="margin-top:8px;font-size:13.5px"
+            class="muted small"
+            style="margin-top:8px"
           >
-            Depois do prazo você ainda pode montar; quem responder tarde gera um aviso.
+            Depois do prazo você ainda pode montar; respostas atrasadas avisam a coordenação.
           </p>
+          <div class="prep-ask-actions__buttons">
+            <button
+              type="button"
+              class="btn btn--block"
+              :disabled="busy || !withWa.length"
+              @click="schedule(true)"
+            >
+              <Icon
+                name="send"
+                :weight="1.9"
+                style="width:18px;height:18px"
+              />Enviar agora para {{ withWa.length }} {{ withWa.length === 1 ? 'pessoa' : 'pessoas' }}
+            </button>
+            <button
+              type="button"
+              class="btn btn--secondary btn--block"
+              :disabled="busy || !withWa.length"
+              @click="schedule(false)"
+            >
+              Agendar para {{ sendPreview }}
+            </button>
+            <button
+              v-if="!req"
+              type="button"
+              class="link link--muted"
+              style="font-size:14.5px;padding:8px 4px"
+              @click="emit('next')"
+            >
+              Pular e montar sem perguntar
+            </button>
+            <button
+              v-else
+              type="button"
+              class="link link--muted"
+              style="font-size:14.5px;padding:8px 4px"
+              @click="editing = false"
+            >
+              Cancelar
+            </button>
+          </div>
         </div>
-      </div>
-      <div class="panel panel--soft">
-        <p class="strong">
-          {{ plural(withWa.length, 'pessoa recebe', 'pessoas recebem') }} pelo WhatsApp
-        </p>
-        <p
-          v-if="withoutWa.length"
-          style="margin-top:4px;color:var(--ink-2);font-size:14.5px"
-        >
-          <strong>{{ withoutWa.length }} ainda não {{ withoutWa.length === 1 ? 'autorizou' : 'autorizaram' }} o WhatsApp:</strong> {{ withoutWa.map((p) => p.displayName).join(', ') }}. Pergunte pessoalmente e registre a resposta aqui depois.
-        </p>
-      </div>
-      <div class="row">
-        <button
-          type="button"
-          class="btn"
-          :disabled="busy"
-          @click="schedule(false)"
-        >
-          Agendar envio
-        </button>
-        <button
-          type="button"
-          class="btn btn--secondary"
-          :disabled="busy"
-          @click="schedule(true)"
-        >
-          <Icon
-            name="send"
-            :weight="1.9"
-            style="width:18px;height:18px"
-          />Enviar agora
-        </button>
-        <button
-          v-if="!req"
-          type="button"
-          class="link link--muted"
-          style="font-size:14.5px;padding:8px 4px"
-          @click="emit('next')"
-        >
-          Pular e montar sem perguntar
-        </button>
-        <button
-          v-else
-          type="button"
-          class="link link--muted"
-          style="font-size:14.5px;padding:8px 4px"
-          @click="editing = false"
-        >
-          Cancelar
-        </button>
       </div>
     </template>
 

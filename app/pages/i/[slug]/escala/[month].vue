@@ -19,9 +19,10 @@ const tabs = computed(() => {
 })
 const myId = computed(() => info.value?.me.personId)
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+const mineOnly = ref(false)
 // A coordenação muda a escala no Preparar (passo Montar), já no culto escolhido.
 const editLink = (serviceId?: string) => link(`/coordenacao/preparar/${month.value}?passo=3${serviceId ? `&culto=${serviceId}` : ''}`)
-const visible = computed(() => (data.value?.services ?? []).filter((s) => s.status === 'scheduled'))
+const visible = computed(() => (data.value?.services ?? []).filter((s) => s.status === 'scheduled' && (!mineOnly.value || s.slots.some((slot) => slot.people.some((p) => p.personId === myId.value && p.status !== 'declined')))))
 </script>
 
 <template>
@@ -38,24 +39,34 @@ const visible = computed(() => (data.value?.services ?? []).filter((s) => s.stat
           {{ cap(monthName(month)) }}
         </h1>
       </div>
-      <nav
-        class="seg seg--white seg--dark"
-        aria-label="Mês"
-      >
-        <NuxtLink
-          v-for="m in tabs"
-          :key="m"
-          :to="link(`/escala/${m}`)"
-          :aria-current="m === month ? 'page' : undefined"
+      <div class="row scale-controls">
+        <button
+          type="button"
+          class="chip chip--dark"
+          :aria-pressed="mineOnly"
+          @click="mineOnly = !mineOnly"
         >
-          {{ cap(monthName(m)) }}
-          <span
-            v-if="m === next && nextInfo && !nextInfo.published"
-            class="tag tag--wait"
-            style="font-size:11px"
-          >em preparação</span>
-        </NuxtLink>
-      </nav>
+          {{ mineOnly ? 'Todas as pessoas' : 'Só as minhas' }}
+        </button>
+        <nav
+          class="seg seg--white seg--dark"
+          aria-label="Mês"
+        >
+          <NuxtLink
+            v-for="m in tabs"
+            :key="m"
+            :to="link(`/escala/${m}`)"
+            :aria-current="m === month ? 'page' : undefined"
+          >
+            {{ cap(monthName(m)) }}
+            <span
+              v-if="m === next && nextInfo && !nextInfo.published"
+              class="tag tag--wait"
+              style="font-size:11px"
+            >em preparação</span>
+          </NuxtLink>
+        </nav>
+      </div>
     </div>
 
     <template v-if="data">
@@ -101,7 +112,7 @@ const visible = computed(() => (data.value?.services ?? []).filter((s) => s.stat
           class="strong"
           style="font-size:18px"
         >
-          {{ data.published ? 'Nenhum culto neste mês' : `${cap(monthName(month))} ainda está sendo montado` }}
+          {{ mineOnly && data.published ? 'Você não está escalado neste mês' : data.published ? 'Nenhum culto neste mês' : `${cap(monthName(month))} ainda está sendo montado` }}
         </p>
         <p
           class="soft"
@@ -110,7 +121,7 @@ const visible = computed(() => (data.value?.services ?? []).filter((s) => s.stat
           {{ data.published ? 'Não há cultos cadastrados.' : 'Aparece aqui quando a coordenação publicar.' }}
         </p>
       </div>
-      <div class="grid-cards">
+      <div class="scale-grid">
         <article
           v-for="s in visible"
           :key="s.id"
