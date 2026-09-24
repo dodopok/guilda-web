@@ -491,6 +491,12 @@ details > summary::-webkit-details-marker { display: none; }
 .check__text { flex: 1; }
 .suggest:disabled { opacity: .45; cursor: not-allowed; }
 
+/* Música escolhida: tom deste culto ao lado */
+.songrow { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 12px; background: var(--surface-3); }
+.songrow__key { display: flex; flex-direction: column; align-items: center; gap: 2px; flex: none; }
+.songrow__key .input { width: 64px; min-height: 40px; padding: 6px 8px; text-align: center; font-weight: 700; font-size: 15px; }
+.linkbtn { border: 0; background: none; padding: 0; color: var(--accent-deep); font: inherit; font-weight: 700; text-decoration: underline; cursor: pointer; }
+
 /* Utilitários de formulário e contagem */
 .fields-2 { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
 .badge-count { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--no); color: #fff; font-size: 12px; font-weight: 800; display: inline-grid; place-items: center; }

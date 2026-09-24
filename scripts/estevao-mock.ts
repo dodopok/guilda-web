@@ -19,6 +19,16 @@ createServer((req, res) => {
     res.setHeader('Content-Type', 'application/json')
     return res.end(JSON.stringify({ data: [{ code: 'loc_2027', name: 'Livro fictício 2027' }, { code: 'loc_2015', name: 'Livro fictício 2015' }], meta: {} }))
   }
+  // Busca de músicas fictícia no formato do serviço de sugestões do Cifra Club (SONG_SEARCH_URL=http://localhost:4010/cc).
+  if (url.pathname === '/cc/') {
+    const q = (url.searchParams.get('q') ?? '').trim()
+    res.setHeader('Content-Type', 'application/json')
+    return res.end(JSON.stringify({ response: { docs: [
+      { tipo: '1', art: 'Artista de Exemplo', dns: 'artista-de-exemplo' },
+      { tipo: '2', art: 'Artista de Exemplo', txt: `${q} (exemplo)`, dns: 'artista-de-exemplo', url: 'cancao-de-exemplo' },
+      { tipo: '2', art: 'Outro Artista', txt: `${q} ao vivo (exemplo)`, dns: 'outro-artista', url: 'cancao-ao-vivo' },
+    ] } }))
+  }
   const m = url.pathname.match(/^\/api\/v2\/days\/(\d{4})-(\d{2})-(\d{2})$/)
   if (!req.headers['x-api-key']) return problem(res, 401, 'MISSING_API_KEY', 'Envie sua chave no cabeçalho X-API-Key.')
   if (!m) return problem(res, 404, 'NOT_FOUND', 'Rota inexistente.')

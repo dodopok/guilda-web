@@ -184,6 +184,29 @@ test('fluxos 6 e 7: roteiro a partir do modelo, Estêvão, publicação e leitur
   await coord.context().close()
 })
 
+test('músicas: repertório e busca no Cifra Club, tom deste culto no aviso ao louvor', async ({ browser }) => {
+  const month = nextMonth()
+  const coord = await as(browser, PHONES.coord)
+  const data = await editor(coord, month)
+  const svc = data.services.filter((s) => s.kind === 'regular')[2]!
+  await coord.goto(`/i/porto/roteiros/${svc.id}`)
+  await coord.getByRole('button', { name: /^Músicas/ }).click()
+  await coord.getByRole('searchbox', { name: 'Buscar música' }).fill('Santo')
+  await expect(coord.getByText('No Cifra Club')).toBeVisible()
+  await coord.getByRole('button', { name: /Santo \(exemplo\).*Adicionar/ }).click()
+  await expect(coord.getByRole('link', { name: /Abrir cifra/ })).toHaveAttribute('href', 'https://www.cifraclub.com.br/artista-de-exemplo/cancao-de-exemplo/')
+  await coord.getByRole('combobox', { name: 'Tom de Santo (exemplo) neste culto' }).fill('G')
+  await coord.getByRole('combobox', { name: 'Tom de Santo (exemplo) neste culto' }).press('Tab')
+  await coord.getByRole('button', { name: 'Salvar músicas e avisar o louvor' }).click()
+  await expect(coord.getByText(/Músicas salvas/)).toBeVisible()
+  const view = await (await coord.request.get(`/api/v1/churches/porto/scripts/${svc.id}`)).json() as { draft: { blocks: { type: string, data: { songIds?: string[], songKeys?: Record<string, string> } }[] } }
+  const music = view.draft.blocks.find((b) => b.type === 'music')!
+  expect(Object.values(music.data.songKeys ?? {})).toEqual(['G'])
+  const songs = await (await coord.request.get('/api/v1/churches/porto/songs')).json() as { songs: { id: string, title: string, link: string | null }[] }
+  expect(songs.songs.find((x) => x.id === music.data.songIds![0])).toMatchObject({ title: 'Santo (exemplo)', link: expect.stringContaining('cifraclub.com.br') })
+  await coord.context().close()
+})
+
 test('modelo de liturgia: título fixo, nome do domingo, rito do LOC e leituras marcadas', async ({ browser }) => {
   const coord = await as(browser, PHONES.coord)
   await coord.goto('/i/porto/coordenacao/modelos')

@@ -221,6 +221,7 @@ export interface BlockData {
   source?: 'estevao' | 'manual'
   slot?: string
   songIds?: string[]
+  songKeys?: Record<string, string>
   items?: { text: string, ownerPersonId?: string | null, status?: 'draft' | 'ready', fixed?: boolean }[]
   templateBody?: string | null
 }

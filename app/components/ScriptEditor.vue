@@ -222,6 +222,12 @@ const songIds = computed({
     if (musicBlock.value) musicBlock.value.data = { ...musicBlock.value.data, songIds: v }
   },
 })
+const songKeys = computed({
+  get: () => musicBlock.value?.data.songKeys ?? {},
+  set: (v) => {
+    if (musicBlock.value) musicBlock.value.data = { ...musicBlock.value.data, songKeys: v }
+  },
+})
 async function saveSongs() {
   if (dirty.value && !(await persist())) return
   try {
@@ -583,6 +589,7 @@ async function saveDraft() {
           <template v-else-if="it.kind === 'music'">
             <SongPicker
               v-model="songIds"
+              v-model:keys="songKeys"
               :songs="songs"
             />
             <button

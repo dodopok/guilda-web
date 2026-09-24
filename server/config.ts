@@ -33,6 +33,11 @@ export function getConfig() {
       readingType: env.ESTEVAO_READING_TYPE ?? 'complementary',
       timeoutMs: int(env.ESTEVAO_TIMEOUT_MS, 8000),
     },
+    // Busca de músicas no Cifra Club (SONG_SEARCH_URL vazio desliga).
+    songSearch: {
+      url: (env.SONG_SEARCH_URL ?? 'https://solr.sscdn.co/cc/c1').replace(/\/$/, ''),
+      timeoutMs: int(env.SONG_SEARCH_TIMEOUT_MS, 5000),
+    },
     worker: {
       intervalSeconds: int(env.WORKER_INTERVAL_SECONDS, 30),
       reminderCatchupHours: int(env.REMINDER_CATCHUP_HOURS, 6),

@@ -145,6 +145,7 @@ export const ROUTES: RouteDoc[] = [
   { method: 'post', path: `${C}/scripts/{serviceId}/music/notify`, summary: 'Aviso individual ao louvor escalado', auth: 'session' },
   { method: 'get', path: `${C}/songs`, summary: 'Repertório', auth: 'session' },
   { method: 'post', path: `${C}/songs`, summary: 'Cadastrar música', auth: 'session', body: songSchema },
+  { method: 'get', path: `${C}/songs/search`, summary: 'Buscar músicas no Cifra Club (título, artista e link; parâmetro q)', auth: 'session' },
   { method: 'patch', path: `${C}/songs/{id}`, summary: 'Alterar música', auth: 'session', body: songSchema.partial() },
 ]
 

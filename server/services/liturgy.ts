@@ -24,6 +24,7 @@ import { badRequest, forbidden, notFound } from '../lib/errors'
 import { formatServiceDate, localParts } from '../lib/time'
 import { firstName, nameKey } from '../lib/text'
 import { EstevaoError, fetchLiturgicalDay, type LiturgicalSuggestion, sundayTitle } from '../integrations/estevao'
+import { searchCifraClub, SongSearchError } from '../integrations/cifraclub'
 import { audit } from './audit'
 import { type ChurchContext, isCoordinator, isPastor, requireCoordinator } from './context'
 import { enqueueMessage } from './messaging/outbox'
@@ -369,6 +370,13 @@ export async function updateScript(db: Db, ctx: ChurchContext, serviceId: string
   return getScript(db, ctx, serviceId)
 }
 
+const musicalKey = z.string().trim().max(20)
+const songKeysSchema = z.record(z.string().uuid(), musicalKey).refine((r) => Object.keys(r).length <= 30)
+// Tom da música neste culto: o escolhido na hora ou, sem escolha, o original do repertório.
+export function keyFor(data: ScriptBlockData, song: { id: string, musicalKey: string | null }) {
+  return data.songKeys?.[song.id]?.trim() || song.musicalKey || null
+}
+
 const scriptBlockSchema = z.object({
   type: z.enum(BLOCK_TYPES),
   title: z.string().trim().min(1).max(200),
@@ -382,6 +390,7 @@ const scriptBlockSchema = z.object({
     source: z.enum(['estevao', 'manual']).optional(),
     slot: z.string().trim().max(40).optional(),
     songIds: z.array(z.string().uuid()).max(30).optional(),
+    songKeys: songKeysSchema.optional(),
     items: z.array(z.object({
       text: z.string().trim().min(1).max(1000),
       ownerPersonId: z.string().uuid().nullable().optional(),
@@ -588,7 +597,7 @@ function sermonIndex(list: { type: string }[]) {
 export const songSchema = z.object({
   title: z.string().trim().min(1).max(200),
   author: z.string().trim().max(200).nullable().optional(),
-  musicalKey: z.string().trim().max(20).nullable().optional(),
+  musicalKey: musicalKey.nullable().optional(),
   link: z.string().trim().url().max(500).nullable().optional().or(z.literal('').transform(() => null)),
   notes: z.string().trim().max(1000).nullable().optional(),
 })
@@ -611,6 +620,11 @@ export async function listSongs(db: Db, ctx: ChurchContext) {
 
 export async function createSong(db: Db, ctx: ChurchContext, input: z.infer<typeof songSchema>) {
   if (!(await canManageSongs(db, ctx))) throw forbidden()
+  // Mesma cifra escolhida de novo pela busca: reaproveita a música do repertório.
+  if (input.link) {
+    const existing = await db.query.songs.findFirst({ where: and(eq(songs.churchId, ctx.church.id), eq(songs.link, input.link)) })
+    if (existing) return existing
+  }
   const [row] = await db.insert(songs).values({ churchId: ctx.church.id, title: input.title, author: input.author ?? null, musicalKey: input.musicalKey ?? null, link: input.link ?? null, notes: input.notes ?? null }).returning()
   return row!
 }
@@ -622,7 +636,19 @@ export async function updateSong(db: Db, ctx: ChurchContext, id: string, input: 
   return row
 }
 
-export const musicSchema = z.object({ blockId: z.string().uuid().optional(), songIds: z.array(z.string().uuid()).max(30) })
+// Busca no Cifra Club para quem escolhe músicas. Falha na busca não impede usar o repertório.
+export async function searchSongs(db: Db, ctx: ChurchContext, query: string, fetchImpl?: typeof fetch) {
+  if (!(await canManageSongs(db, ctx))) throw forbidden()
+  const cfg = getConfig().songSearch
+  try {
+    return { available: true, hits: await searchCifraClub({ url: cfg.url, timeoutMs: cfg.timeoutMs, fetchImpl }, query) }
+  } catch (err) {
+    if (!(err instanceof SongSearchError)) throw err
+    return { available: false, reason: err.message, hits: [] }
+  }
+}
+
+export const musicSchema = z.object({ blockId: z.string().uuid().optional(), songIds: z.array(z.string().uuid()).max(30), songKeys: songKeysSchema.optional() })
 
 // Quem prega (ou os pastores, quando pedem) escolhe as músicas, sem editar o resto.
 export async function setMusic(db: Db, ctx: ChurchContext, serviceId: string, input: z.infer<typeof musicSchema>) {
@@ -641,9 +667,10 @@ export async function setMusic(db: Db, ctx: ChurchContext, serviceId: string, in
       const [created] = await tx.insert(scriptBlocks).values({ churchId: ctx.church.id, scriptId: script.id, position: (pos?.n ?? -1) + 1, type: 'music', title: 'Músicas', data: {} }).returning()
       target = created!
     }
-    await tx.update(scriptBlocks).set({ data: { ...target.data, songIds: input.songIds } }).where(eq(scriptBlocks.id, target.id))
+    const songKeys = Object.fromEntries(Object.entries(input.songKeys ?? {}).filter(([id, k]) => input.songIds.includes(id) && k))
+    await tx.update(scriptBlocks).set({ data: { ...target.data, songIds: input.songIds, songKeys } }).where(eq(scriptBlocks.id, target.id))
     await tx.update(serviceScripts).set({ updatedAt: new Date() }).where(eq(serviceScripts.id, script.id))
-    await audit(tx, { churchId: ctx.church.id, actorAccountId: ctx.accountId, action: 'script.music_set', entityType: 'script', entityId: script.id, data: { songIds: input.songIds } })
+    await audit(tx, { churchId: ctx.church.id, actorAccountId: ctx.accountId, action: 'script.music_set', entityType: 'script', entityId: script.id, data: { songIds: input.songIds, songKeys: input.songKeys ?? {} } })
   })
   return getScript(db, ctx, serviceId)
 }
@@ -656,11 +683,15 @@ export async function notifyMusic(db: Db, ctx: ChurchContext, serviceId: string)
   if (!(await canChooseMusic(db, ctx, serviceId, script.musicChooser))) throw forbidden()
   const service = await loadService(db, ctx, serviceId)
   const blocks = await db.select().from(scriptBlocks).where(and(eq(scriptBlocks.churchId, ctx.church.id), eq(scriptBlocks.scriptId, script.id), eq(scriptBlocks.type, 'music'))).orderBy(asc(scriptBlocks.position))
-  const songIds = blocks.flatMap((b) => b.data.songIds ?? [])
+  const picks = blocks.flatMap((b) => (b.data.songIds ?? []).map((id) => ({ id, data: b.data })))
+  const songIds = picks.map((p) => p.id)
   if (!songIds.length) throw badRequest('no_songs', 'Escolha as músicas antes de avisar o louvor.')
   const songRows = await db.select().from(songs).where(and(eq(songs.churchId, ctx.church.id), inArray(songs.id, songIds)))
-  const ordered = songIds.map((id) => songRows.find((s) => s.id === id)).filter((s): s is typeof songRows[number] => Boolean(s))
-  const list = ordered.map((s) => (s.musicalKey ? `${s.title} (${s.musicalKey})` : s.title)).join(', ')
+  const ordered = picks.flatMap((p) => {
+    const song = songRows.find((s) => s.id === p.id)
+    return song ? [{ title: song.title, key: keyFor(p.data, song) }] : []
+  })
+  const list = ordered.map((s) => (s.key ? `${s.title} (tom ${s.key})` : s.title)).join(', ')
   const month = await db.query.scheduleMonths.findFirst({ where: and(eq(scheduleMonths.churchId, ctx.church.id), eq(scheduleMonths.month, service.month)) })
   if (month?.status !== 'published') throw badRequest('schedule_not_published', 'Publique a escala do mês antes de avisar o louvor.')
   const team = await db.selectDistinct({ personId: people.id, name: people.displayName }).from(assignments)
@@ -668,7 +699,8 @@ export async function notifyMusic(db: Db, ctx: ChurchContext, serviceId: string)
     .innerJoin(duties, and(eq(duties.churchId, slots.churchId), eq(duties.id, slots.dutyId)))
     .innerJoin(people, and(eq(people.churchId, assignments.churchId), eq(people.id, assignments.personId)))
     .where(and(eq(assignments.churchId, ctx.church.id), eq(slots.serviceId, serviceId), eq(duties.receivesMusicNotice, true), ne(assignments.status, 'declined')))
-  const hash = sha256(songIds.join(',')).slice(0, 16)
+  // Trocar música ou tom gera novo aviso; repetir a mesma lista não reenvia.
+  const hash = sha256(ordered.map((s) => `${s.title}|${s.key ?? ''}`).join(',')).slice(0, 16)
   let queued = 0
   let blocked = 0
   for (const member of team) {
@@ -750,7 +782,7 @@ export async function publishScript(db: Db, ctx: ChurchContext, serviceId: strin
       personId: b.personId,
       reference: b.data.reference ?? null,
       responsibles: b.responsibles.map((r) => ({ name: r.name, status: r.status })),
-      songs: b.songs.map((s) => ({ title: s!.title, author: s!.author, musicalKey: s!.musicalKey, link: s!.link })),
+      songs: b.songs.map((s) => ({ title: s!.title, author: s!.author, musicalKey: keyFor(b.data, s!), originalKey: s!.musicalKey, link: s!.link })),
       items: (b.data.items ?? []).map((i) => ({ text: i.text, owner: i.ownerPersonId ? ownerName.get(i.ownerPersonId) ?? null : null, status: i.status })),
     })),
   }

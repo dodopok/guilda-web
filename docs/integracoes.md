@@ -92,6 +92,17 @@ Conferência manual, sem gravar nada: `ESTEVAO_API_URL=… ESTEVAO_API_KEY=… n
 1. Cobertura de datas do livro escolhido para os meses de uso e festas transferidas.
 2. **Direitos de exibição e redistribuição** dos textos do LOC (coleta e ritos) e dos textos bíblicos. Por isso: textos do LOC ficam restritos à igreja que os cadastrou, os modelos de exemplo têm apenas marcadores, e não há cópia de modelos entre igrejas. Confirmar com os detentores dos direitos antes de oferecer modelos a outras comunidades.
 
+## Busca de músicas (Cifra Club)
+
+Quem escolhe as músicas busca no repertório da igreja e, na mesma caixa, no Cifra Club.
+
+- **Como funciona:** o servidor consulta o serviço de sugestões que a caixa de busca do próprio site usa (`SONG_SEARCH_URL`, padrão `https://solr.sscdn.co/cc/c1`). **Não é uma API oficial nem documentada**: pode mudar ou sair do ar sem aviso. Se falhar, a tela avisa e o repertório continua funcionando. `SONG_SEARCH_URL` vazio desliga a busca.
+- **O que sai e o que fica:** sai só o texto digitado. Ficam só título, artista e o link da cifra (montado a partir de partes validadas). Letra e acordes nunca são buscados nem guardados. Resultados ficam 10 minutos em memória; limite de 60 buscas por minuto por IP.
+- **Tom original:** não vem na busca. A página da cifra bloqueia servidores (403 em 23/09/2026) e seu conteúdo tem direitos autorais, por isso não é lida. Quem escolhe abre a cifra pelo link e digita o tom; se a música ainda não tem tom original no repertório, um toque guarda o digitado como original.
+- **Tom do culto:** cada roteiro guarda o tom de cada música (`songKeys` no bloco de músicas); sem tom escolhido, vale o original. O aviso ao louvor e o roteiro publicado usam o tom do culto; mudar só o tom gera um novo aviso.
+- **Testes:** o Estêvão simulado (`pnpm estevao:mock`) também responde a busca em `/cc/` com dados fictícios.
+- **Não validado:** termos de uso do Cifra Club para esse serviço de sugestões. Se a igreja preferir não usar, basta deixar `SONG_SEARCH_URL` vazio.
+
 ## Roteiro, músicas e avisos
 
-Roteiro montado no app a partir de modelo, escala e Estêvão; revisão pastoral informal (nota da pastoral, sem bloqueio); publicação versionada pela coordenação; leitura no celular; exportação em HTML imprimível, texto e JSON. Músicas ficam no repertório da igreja (sem letras, só título, autor, tom e link) e o aviso individual vai só às pessoas escaladas em funções marcadas para recebê-lo. Envio automático do roteiro e publicação em grupos continuam fora do primeiro lançamento.
+Roteiro montado no app a partir de modelo, escala e Estêvão; revisão pastoral informal (nota da pastoral, sem bloqueio); publicação versionada pela coordenação; leitura no celular; exportação em HTML imprimível, texto e JSON. Músicas ficam no repertório da igreja (sem letras, só título, autor, tom original e link), com tom próprio em cada culto, e o aviso individual vai só às pessoas escaladas em funções marcadas para recebê-lo. Envio automático do roteiro e publicação em grupos continuam fora do primeiro lançamento.

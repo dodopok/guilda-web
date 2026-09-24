@@ -73,14 +73,17 @@ const draftTag = computed(() => {
 
 // Quem prega (sem editar o resto) escolhe as músicas.
 const preacherSongs = ref<string[]>([])
+const preacherKeys = ref<Record<string, string>>({})
 watchEffect(() => {
-  preacherSongs.value = data.value?.draft?.blocks.find((b) => b.type === 'music')?.data.songIds ?? []
+  const music = data.value?.draft?.blocks.find((b) => b.type === 'music')
+  preacherSongs.value = music?.data.songIds ?? []
+  preacherKeys.value = music?.data.songKeys ?? {}
 })
 const savingSongs = ref(false)
 async function savePreacherSongs() {
   savingSongs.value = true
   try {
-    await capi(`/scripts/${serviceId.value}/music`, { method: 'PUT', body: { songIds: preacherSongs.value } })
+    await capi(`/scripts/${serviceId.value}/music`, { method: 'PUT', body: { songIds: preacherSongs.value, songKeys: preacherKeys.value } })
     const r = await capi<{ recipients: number }>(`/scripts/${serviceId.value}/music/notify`, { method: 'POST' })
     toast.ok(r.recipients ? `Músicas salvas. ${plural(r.recipients, 'pessoa do louvor recebe', 'pessoas do louvor recebem')} o aviso.` : 'Músicas salvas.')
     await refresh()
@@ -272,6 +275,7 @@ const exportBase = computed(() => `/api/v1/churches/${slug.value}/scripts/${serv
           </p>
           <SongPicker
             v-model="preacherSongs"
+            v-model:keys="preacherKeys"
             :songs="aux?.songs ?? []"
           />
           <button

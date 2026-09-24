@@ -15,6 +15,7 @@ export function e2eEnv(): Record<string, string> {
     WHATSAPP_ALLOW_REAL_SEND: 'false',
     ESTEVAO_API_URL: `http://localhost:${MOCK_PORT}`,
     ESTEVAO_API_KEY: 'e2e-mock',
+    SONG_SEARCH_URL: `http://localhost:${MOCK_PORT}/cc`,
     WORKER_INTERVAL_SECONDS: '1',
     REMINDER_CATCHUP_HOURS: '6',
     ESTEVAO_MOCK_PORT: String(MOCK_PORT),

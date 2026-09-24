@@ -154,8 +154,8 @@ async function save() {
           ></label>
           <label
             class="field"
-            style="width:96px"
-          ><span class="field__label">Tom</span><input
+            style="width:112px"
+          ><span class="field__label">Tom original</span><input
             v-model="form.musicalKey"
             class="input"
             style="text-align:center"
