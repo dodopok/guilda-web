@@ -17,6 +17,17 @@ const toast = useToast()
 const local = ref<Song[]>([])
 const all = computed(() => [...local.value, ...props.songs.filter((s) => !local.value.some((l) => l.id === s.id))])
 const byId = (id: string) => all.value.find((s) => s.id === id)
+// Ordem das músicas no culto: arrastar pela alça (ou setas no teclado).
+const chosenEl = ref<HTMLElement | null>(null)
+const order = computed({ get: () => props.modelValue, set: (v) => emit('update:modelValue', v) })
+const { moveItem } = useSortableList(chosenEl, order)
+async function moveByKey(i: number, dir: -1 | 1) {
+  const j = i + dir
+  if (j < 0 || j >= order.value.length) return
+  moveItem(i, j)
+  await nextTick()
+  chosenEl.value?.querySelectorAll<HTMLElement>('.drag-handle')[j]?.focus()
+}
 const chosen = computed(() => props.modelValue.map(byId).filter((s): s is Song => Boolean(s)))
 
 const query = ref('')
@@ -92,6 +103,7 @@ const origLine = (s: Song) => [s.author, s.musicalKey ? `original ${s.musicalKey
       />
     </datalist>
     <div
+      ref="chosenEl"
       class="stack-sm"
       style="gap:6px"
     >
@@ -100,6 +112,18 @@ const origLine = (s: Song) => [s.author, s.musicalKey ? `original ${s.musicalKey
         :key="s.id"
         class="songrow"
       >
+        <button
+          type="button"
+          class="drag-handle drag-handle--sm"
+          :aria-label="`Mover ${s.title} (${i + 1}ª música). Arraste ou use as setas.`"
+          @keydown.up.prevent="moveByKey(i, -1)"
+          @keydown.down.prevent="moveByKey(i, 1)"
+        >
+          <Icon
+            name="grip"
+            :weight="3"
+          />
+        </button>
         <span
           class="av av--sm"
           style="width:24px;height:24px;font-size:12px;color:var(--ink-2);flex:none"

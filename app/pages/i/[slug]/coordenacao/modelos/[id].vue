@@ -44,7 +44,8 @@ function fromBlocks(blocks: RawBlock[]): Item[] {
       }
       continue
     }
-    const kind: TemplateKindKey = b.type === 'heading' ? (b.textSource === 'estevao' ? 'sunday' : 'heading') : (b.type as TemplateKindKey)
+    // "Texto" antigo é o mesmo que rito/texto fixo: abre e salva como rito.
+    const kind: TemplateKindKey = b.type === 'heading' ? (b.textSource === 'estevao' ? 'sunday' : 'heading') : b.type === 'text' ? 'rite' : (b.type as TemplateKindKey)
     out.push({ key: newKey(), kind: kind in BLOCK_KINDS ? kind : 'text', title: b.title, body: b.body ?? '', loc: b.textSource === 'loc_manual', dutyId: b.dutyId, slots: [] })
   }
   return out
@@ -93,16 +94,21 @@ function subOf(it: Item) {
     case 'collect': return ['Vem do Estêvão', who].filter(Boolean).join(' · ')
     case 'readings': return READING_SLOTS.filter((s) => it.slots.includes(s.slot)).map((s) => SLOT_SHORT[s.slot] ?? s.title).join(', ') || 'Nenhuma leitura marcada'
     case 'rite':
-    case 'text': return [it.loc ? 'Texto do LOC' : it.body.trim() ? 'Texto da igreja' : 'Sem texto', who].filter(Boolean).join(' · ')
+    case 'text': return [it.body.trim() ? 'Texto fixo' : 'Sem texto', who].filter(Boolean).join(' · ')
     default: return who ? who.charAt(0).toUpperCase() + who.slice(1) : BLOCK_KINDS[it.kind].label
   }
 }
-function move(i: number, dir: -1 | 1) {
+// Reordenar: arrastar pela alça ou, no teclado, setas na alça (o foco acompanha o bloco).
+const listEl = ref<HTMLElement | null>(null)
+const { moveItem } = useSortableList(listEl, items)
+const moved = ref('')
+async function moveByKey(i: number, dir: -1 | 1) {
   const j = i + dir
   if (j < 0 || j >= items.value.length) return
-  const list = [...items.value]
-  ;[list[i], list[j]] = [list[j]!, list[i]!]
-  items.value = list
+  moveItem(i, j)
+  moved.value = `${rowTitle(items.value[j]!)} agora na posição ${j + 1}.`
+  await nextTick()
+  listEl.value?.querySelectorAll<HTMLElement>('.drag-handle')[j]?.focus()
 }
 function remove(i: number) {
   items.value = items.value.filter((_, k) => k !== i)
@@ -114,7 +120,7 @@ function toggleSlot(it: Item, slot: string) {
 const adding = ref(false)
 const hasReadings = computed(() => items.value.some((i) => i.kind === 'readings'))
 const GROUPS: { title: string, sub: string, kinds: TemplateKindKey[] }[] = [
-  { title: 'Da igreja', sub: 'Texto que vocês escrevem uma vez e vale para todo culto deste modelo.', kinds: ['heading', 'rite', 'sermon', 'music', 'announcements', 'text'] },
+  { title: 'Da igreja', sub: 'Texto que vocês escrevem uma vez e vale para todo culto deste modelo.', kinds: ['heading', 'rite', 'sermon', 'music', 'announcements'] },
   { title: 'Vem do Estêvão', sub: 'Preenchido a cada domingo, conforme o calendário e o lecionário.', kinds: ['sunday', 'collect', 'readings'] },
 ]
 function add(kind: TemplateKindKey) {
@@ -227,7 +233,7 @@ async function doSave(apply: boolean) {
         maxlength="120"
       >
       <p class="lede">
-        A ordem do culto. Toque em um bloco para editar, mover ou tirar.
+        A ordem do culto. Arraste pela alça para mudar a ordem; toque no bloco para editar.
       </p>
     </div>
 
@@ -256,8 +262,15 @@ async function doSave(apply: boolean) {
       </button>
     </div>
 
+    <p
+      class="sr-only"
+      aria-live="polite"
+    >
+      {{ moved }}
+    </p>
     <ol
       v-if="items.length"
+      ref="listEl"
       class="stack-sm"
       style="list-style:none;margin:0;padding:0;gap:8px"
     >
@@ -267,25 +280,36 @@ async function doSave(apply: boolean) {
         class="card card--flush tplrow"
         :style="{ borderLeftColor: BLOCK_KINDS[it.kind].fg === '#fff' ? BLOCK_KINDS[it.kind].bg : BLOCK_KINDS[it.kind].fg }"
       >
-        <button
-          type="button"
-          class="tplrow__main"
-          :aria-expanded="openKey === it.key"
-          @click="openKey = openKey === it.key ? null : it.key"
-        >
-          <span
-            class="tplrow__num"
-            aria-hidden="true"
-          >{{ i + 1 }}</span>
-          <span style="flex:1;min-width:0">
-            <span class="strong tplrow__title">{{ rowTitle(it) }}</span>
-            <span class="muted tplrow__sub">{{ subOf(it) }}</span>
-          </span>
-          <Icon
-            :name="openKey === it.key ? 'chevron-up' : 'chevron-down'"
-            class="listrow__chev"
-          />
-        </button>
+        <div class="tplrow__head">
+          <!-- Alça: arraste com o dedo ou o mouse; no teclado, setas para cima e para baixo. -->
+          <button
+            type="button"
+            class="drag-handle"
+            :aria-label="`Mover ${rowTitle(it)} (posição ${i + 1} de ${items.length}). Arraste ou use as setas.`"
+            @keydown.up.prevent="moveByKey(i, -1)"
+            @keydown.down.prevent="moveByKey(i, 1)"
+          >
+            <Icon
+              name="grip"
+              :weight="3"
+            />
+          </button>
+          <button
+            type="button"
+            class="tplrow__main"
+            :aria-expanded="openKey === it.key"
+            @click="openKey = openKey === it.key ? null : it.key"
+          >
+            <span style="flex:1;min-width:0">
+              <span class="strong tplrow__title">{{ rowTitle(it) }}</span>
+              <span class="muted tplrow__sub">{{ subOf(it) }}</span>
+            </span>
+            <Icon
+              :name="openKey === it.key ? 'chevron-up' : 'chevron-down'"
+              class="listrow__chev"
+            />
+          </button>
+        </div>
 
         <div
           v-if="openKey === it.key"
@@ -312,7 +336,7 @@ async function doSave(apply: boolean) {
             v-if="it.kind !== 'sunday' && it.kind !== 'readings'"
             class="field"
           >
-            <span class="field__label">Título no roteiro</span>
+            <span class="field__label">Nome no roteiro</span>
             <input
               v-model="it.title"
               class="input"
@@ -359,19 +383,6 @@ async function doSave(apply: boolean) {
                 placeholder="O que vai no roteiro de todo culto deste modelo"
               />
             </label>
-            <label class="check">
-              <input
-                v-model="it.loc"
-                type="checkbox"
-              >
-              <span class="check__text">
-                <span class="strong">É texto do Livro de Oração (LOC)</span>
-                <span
-                  class="small muted"
-                  style="display:block"
-                >Marque quando copiar o texto do livro. Ele fica só nesta igreja e não é compartilhado com outras.</span>
-              </span>
-            </label>
           </template>
 
           <label
@@ -385,12 +396,12 @@ async function doSave(apply: boolean) {
             >
               <option :value="null">Ninguém em especial</option>
               <option
-                v-for="d in data.duties"
+                v-for="d in data.duties.filter((x) => x.inScript || x.id === it.dutyId)"
                 :key="d.id"
                 :value="d.id"
               >{{ d.name }}</option>
             </select>
-            <span class="field__hint">A pessoa escalada nessa função aparece no roteiro.</span>
+            <span class="field__hint">Quem estiver escalado nessa função aparece no roteiro.</span>
           </label>
 
           <div
@@ -399,32 +410,8 @@ async function doSave(apply: boolean) {
           >
             <button
               type="button"
-              class="btn btn--secondary btn--xs"
-              :disabled="i === 0"
-              @click="move(i, -1)"
-            >
-              <Icon
-                name="chevron-up"
-                :weight="2.2"
-                style="width:16px;height:16px"
-              />Subir
-            </button>
-            <button
-              type="button"
-              class="btn btn--secondary btn--xs"
-              :disabled="i === items.length - 1"
-              @click="move(i, 1)"
-            >
-              <Icon
-                name="chevron-down"
-                :weight="2.2"
-                style="width:16px;height:16px"
-              />Descer
-            </button>
-            <button
-              type="button"
               class="linkbtn"
-              style="margin-left:auto;color:var(--danger, #b3261e)"
+              style="color:var(--danger, #b3261e)"
               @click="remove(i)"
             >
               Tirar do modelo
