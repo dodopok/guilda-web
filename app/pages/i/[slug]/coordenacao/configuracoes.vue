@@ -195,8 +195,8 @@ async function saveSection(section: SettingsSection, closeWhileSaving: boolean) 
 }
 const wa = computed(() => {
   const mode = info.value?.whatsappMode
-  if (mode === 'cloud_api' || mode === 'ycloud') return { tag: 'canal oficial', tone: 'tag--ok', text: 'O canal oficial está configurado. Os envios reais seguem as travas do canal (modelos aprovados, modo de teste e autorização de cada pessoa).' }
-  if (mode === 'simulation') return { tag: 'modo de teste', tone: 'tag--wait', text: 'Hoje nenhuma mensagem sai de verdade. Para ligar, precisamos do número oficial da igreja e da autorização de cada pessoa — a gente te guia passo a passo.' }
+  if (mode === 'cloud_api' || mode === 'ycloud') return { tag: 'canal oficial', tone: 'tag--ok', text: 'O canal oficial está configurado. Modelos sem aprovação e pessoas sem autorização ficam bloqueados individualmente.' }
+  if (mode === 'simulation') return { tag: 'modo de teste', tone: 'tag--wait', text: 'Hoje nenhuma mensagem sai de verdade. Para ligar, precisamos do número oficial da igreja e de ao menos uma autorização registrada. Quem não autorizou não recebe.' }
   return { tag: 'desligado', tone: 'tag--no', text: 'Nenhuma mensagem sai. Ative o modo de teste para experimentar ou siga o passo a passo para ligar o canal oficial.' }
 })
 // Contagens dos atalhos: mensagens para revisar e músicas no repertório.
@@ -210,8 +210,8 @@ const { data: toolCounts } = useLazyAsyncData(`tool-counts-${slug.value}`, async
     ? [
         channel.readiness.hasCredentials && channel.readiness.hasWebhookSecret,
         channel.coexistence.status === 'verified',
-        channel.templates.length > 0 && channel.templates.every((template) => template.status === 'approved'),
-        channel.consents.people > 0 && channel.consents.granted === channel.consents.people,
+        channel.templates.some((template) => template.status === 'approved'),
+        channel.consents.granted > 0,
       ].filter(Boolean).length
     : null
   return { review: (m?.counts.failed ?? 0) + (m?.counts.unknown ?? 0), songs: songs?.songs.length ?? null, waSteps }
