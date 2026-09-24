@@ -116,19 +116,22 @@ watch(bulkText, (value) => {
   if (value && peopleDone.value) peopleDone.value = false
 })
 const parsedPeople = computed(() => bulkText.value.split(/\r?\n/).map((line) => {
-  const [name = '', ...rest] = line.trim().split(/[\t,;|]/)
-  const phone = rest.join(' ').trim()
-  return { name: name.trim(), phone: phone || null }
+  const [name = '', phoneValue = '', consentValue = ''] = line.trim().split(/[\t,;|]/)
+  const phone = phoneValue.trim()
+  const whatsappConsent = /^(sim|s|autorizado|autorizada|yes|true)$/i.test(consentValue.trim())
+  return { name: name.trim(), phone: phone || null, whatsappConsent }
 }).filter((p) => p.name.length >= 2))
 const peopleWithPhone = computed(() => parsedPeople.value.filter((p) => {
   const digits = p.phone?.replace(/\D/g, '').length ?? 0
   return digits >= 10 && digits <= 15
 }).length)
+const peopleWithConsent = computed(() => parsedPeople.value.filter((p) => p.whatsappConsent).length)
 const invalidPhoneCount = computed(() => parsedPeople.value.filter((p) => {
   if (!p.phone) return false
   const digits = p.phone.replace(/\D/g, '')
   return digits.length < 10 || digits.length > 15
 }).length)
+const consentWithoutPhoneCount = computed(() => parsedPeople.value.filter((p) => p.whatsappConsent && !p.phone).length)
 async function addBulkPeople() {
   if (!parsedPeople.value.length || bulkBusy.value) return
   const peopleToCreate = [...parsedPeople.value]
@@ -136,7 +139,7 @@ async function addBulkPeople() {
   bulkBusy.value = true
   try {
     for (const person of peopleToCreate) {
-      await capi('/people', { method: 'POST', body: { displayName: person.name, phone: person.phone, roles: ['participant'] } })
+      await capi('/people', { method: 'POST', body: { displayName: person.name, phone: person.phone, roles: ['participant'], whatsappConsent: person.whatsappConsent } })
       created++
     }
     bulkText.value = ''
@@ -145,7 +148,7 @@ async function addBulkPeople() {
     peopleDone.value = true
     step.value = 4
   } catch (e) {
-    if (created) bulkText.value = peopleToCreate.slice(created).map((person) => `${person.name}${person.phone ? `, ${person.phone}` : ''}`).join('\n')
+    if (created) bulkText.value = peopleToCreate.slice(created).map((person) => `${person.name}${person.phone ? `, ${person.phone}` : ''}${person.whatsappConsent ? ', sim' : ''}`).join('\n')
     await loadPeople().catch(() => undefined)
     toast.error(e, created ? `${created} pessoas cadastradas; revise as restantes antes de tentar novamente.` : 'Não foi possível cadastrar as pessoas.')
   } finally {
@@ -476,7 +479,7 @@ async function finish(to: 'preparar' | 'mesa') {
               class="soft"
               style="margin-top:8px"
             >
-              Cole os nomes, um por linha. Se quiser, coloque o celular depois do nome, separado por vírgula ou tabulação.
+              Cole um nome por linha. Informe o celular na segunda coluna e “sim” na terceira quando a pessoa já tiver autorizado mensagens pelo WhatsApp.
             </p>
           </div>
           <label class="field">
@@ -485,7 +488,7 @@ async function finish(to: 'preparar' | 'mesa') {
               v-model="bulkText"
               class="input setup-people-input"
               rows="7"
-              placeholder="Ana Souza, 11999990000&#10;Bruno Lima&#10;Carla Nunes, 11988887777"
+              placeholder="Ana Souza, 11999990000, sim&#10;Bruno Lima, 11999991111&#10;Carla Nunes, 11988887777, sim"
               aria-describedby="setup-people-preview"
             />
           </label>
@@ -496,6 +499,9 @@ async function finish(to: 'preparar' | 'mesa') {
             {{ parsedPeople.length }} {{ parsedPeople.length === 1 ? 'pessoa reconhecida' : 'pessoas reconhecidas' }}<template v-if="peopleWithPhone">
               · {{ peopleWithPhone }} com celular
             </template>
+            <template v-if="peopleWithConsent">
+              · {{ peopleWithConsent }} com autorização para WhatsApp
+            </template>
           </p>
           <p
             v-if="invalidPhoneCount"
@@ -503,6 +509,13 @@ async function finish(to: 'preparar' | 'mesa') {
             role="alert"
           >
             Confira o DDD e o número de {{ invalidPhoneCount === 1 ? 'celular' : 'celulares' }} informado{{ invalidPhoneCount === 1 ? '' : 's' }}.
+          </p>
+          <p
+            v-if="consentWithoutPhoneCount"
+            class="form-error"
+            role="alert"
+          >
+            Informe um celular para {{ consentWithoutPhoneCount === 1 ? 'a pessoa' : 'as pessoas' }} que autorizaram o WhatsApp.
           </p>
           <div
             v-if="people.length"
@@ -523,7 +536,7 @@ async function finish(to: 'preparar' | 'mesa') {
             <button
               type="button"
               class="btn"
-              :disabled="bulkBusy || !parsedPeople.length || invalidPhoneCount > 0"
+              :disabled="bulkBusy || !parsedPeople.length || invalidPhoneCount > 0 || consentWithoutPhoneCount > 0"
               @click="addBulkPeople"
             >
               {{ bulkBusy ? 'Cadastrando…' : `Cadastrar ${parsedPeople.length} ${parsedPeople.length === 1 ? 'pessoa' : 'pessoas'} e seguir` }}

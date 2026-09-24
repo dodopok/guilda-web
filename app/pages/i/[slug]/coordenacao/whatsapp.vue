@@ -107,24 +107,24 @@ const checklist = computed(() => {
   const total = c.templates.length
   return [
     { label: 'Número verificado', sub: official.value ? (c.readiness.hasCredentials ? 'Número e chave cadastrados' : 'Cadastre o número e a chave acima') : 'Escolha um modo oficial', done: official.value && c.readiness.hasCredentials },
-    { label: 'Modelos aprovados', sub: `${approved.value} de ${total} aprovados no provedor`, done: approved.value === total },
+    { label: 'Modelos aprovados', sub: `${approved.value} de ${total} aprovados · os demais ficam bloqueados`, done: approved.value > 0 },
     { label: 'Webhook respondendo', sub: !official.value ? 'Precisa de um modo oficial' : c.lastWebhookAt ? `Último sinal: ${stamp(c.lastWebhookAt, tz.value)}` : c.readiness.hasWebhookSecret ? 'Nenhum sinal recebido ainda' : 'Cadastre o segredo do webhook', done: official.value && c.readiness.hasWebhookSecret && Boolean(c.lastWebhookAt) },
     { label: 'Coexistência comprovada', sub: c.readiness.coexistenceVerified ? 'Registrado abaixo' : 'Registre abaixo como foi testado', done: c.readiness.coexistenceVerified },
-    { label: 'Autorizações registradas', sub: `${c.consents.granted} de ${c.consents.people} pessoas autorizaram`, done: c.consents.people > 0 && c.consents.granted === c.consents.people, action: 'Ver pessoas', to: link('/coordenacao/pessoas') },
+    { label: 'Autorizações registradas', sub: `${c.consents.granted} de ${c.consents.people} autorizaram · demais não recebem`, done: c.consents.granted > 0, action: 'Ver pessoas', to: link('/coordenacao/pessoas') },
   ]
 })
 const officialSetupDone = computed(() => checklist.value.some((c) => c.label === 'Número verificado' && c.done) && checklist.value.some((c) => c.label === 'Webhook respondendo' && c.done))
 const templateStepDone = computed(() => {
   const total = data.value?.templates.length ?? 0
-  return total > 0 && approved.value === total
+  return total > 0 && approved.value > 0
 })
-const consentsReady = computed(() => Boolean(data.value?.consents.people) && data.value?.consents.granted === data.value?.consents.people)
+const consentsReady = computed(() => Boolean(data.value?.consents.granted))
 interface WaStep { n: number, title: string, sub: string, done: boolean }
 const waSteps = computed<WaStep[]>(() => [
   { n: 1, title: 'Conectar a conta', sub: officialSetupDone.value ? 'Chave e webhook prontos' : 'Conta, chave e webhook', done: officialSetupDone.value },
   { n: 2, title: 'Comprovar coexistência', sub: data.value?.coexistence.status === 'verified' ? 'O WhatsApp Business segue ativo' : 'O mesmo número continua no celular', done: data.value?.coexistence.status === 'verified' },
-  { n: 3, title: 'Aprovar os modelos', sub: `${approved.value} de ${data.value?.templates.length ?? 0} aprovados no provedor`, done: templateStepDone.value },
-  { n: 4, title: 'Testar e ligar', sub: consentsReady.value ? 'Autorizações registradas' : `${data.value?.consents.granted ?? 0} de ${data.value?.consents.people ?? 0} autorizaram`, done: Boolean(data.value?.readiness.canSendReal && templateStepDone.value && consentsReady.value && !data.value?.testMode) },
+  { n: 3, title: 'Aprovar os modelos', sub: `${approved.value} de ${data.value?.templates.length ?? 0} aprovados · demais bloqueados`, done: templateStepDone.value },
+  { n: 4, title: 'Testar e ligar', sub: `${data.value?.consents.granted ?? 0} de ${data.value?.consents.people ?? 0} autorizaram · pendentes não recebem`, done: Boolean(data.value?.readiness.canSendReal && templateStepDone.value && consentsReady.value && !data.value?.testMode) },
 ])
 const selectedStep = ref(0)
 const currentStep = computed(() => selectedStep.value || waSteps.value.find((item) => !item.done)?.n || 4)
@@ -135,8 +135,8 @@ const enableBlocker = computed(() => {
   if (!data.value?.readiness.realSendAllowedByServer) return 'O servidor ainda não liberou o envio real.'
   if (!officialSetupDone.value) return 'Conclua a conta e o webhook primeiro.'
   if (data.value?.coexistence.status !== 'verified') return 'Comprove que o WhatsApp Business continua funcionando no aparelho.'
-  if (!templateStepDone.value) return `Aprove todos os ${data.value?.templates.length ?? 0} modelos cadastrados no provedor selecionado.`
-  if (!consentsReady.value) return 'Registre a autorização de todas as pessoas com celular.'
+  if (!templateStepDone.value) return 'Aprove ao menos um modelo. Mensagens sem modelo aprovado ficam bloqueadas.'
+  if (!consentsReady.value) return 'Registre a autorização de pelo menos uma pessoa; quem estiver pendente não recebe.'
   return ''
 })
 function openStep(n: number) {
@@ -734,7 +734,7 @@ async function enableRealSending() {
                 class="soft"
                 style="margin-top:5px"
               >
-                Só ligue depois que o teste chegar no WhatsApp Business e os modelos estiverem aprovados.
+                Só ligue depois que o teste chegar no WhatsApp Business e pelo menos um modelo estiver aprovado. Tipos não aprovados e pessoas sem autorização continuam bloqueados.
               </p>
             </div>
             <div class="card card--flush rows">
