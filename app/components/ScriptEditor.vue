@@ -73,12 +73,13 @@ function isAdapted(b: EditableBlock) {
 function summary(it: Item) {
   const b = it.block
   switch (it.kind) {
-    case 'rite': return b?.data.templateBody === undefined ? (b?.body ? 'texto do roteiro' : 'sem texto') : isAdapted(b!) ? 'texto adaptado' : 'texto padrão do modelo'
-    case 'collect': return b?.body ? (b.textSource === 'estevao' ? 'do Estêvão' : 'texto manual') : 'ainda sem coleta'
+    // Só o que ajuda a decidir: rito igual ao modelo não precisa de legenda.
+    case 'rite': return !b?.body ? 'sem texto' : isAdapted(b) ? 'adaptado para este culto' : ''
+    case 'collect': return b?.body ? '' : 'falta a coleta'
     case 'music': return songCount.value ? plural(songCount.value, 'música', 'músicas') : 'escolher músicas'
     case 'readings': return readings.value.length ? (readersMissing.value ? plural(readersMissing.value, 'leitura sem leitor', 'leituras sem leitor') : 'todas com leitor') : 'sem leituras'
-    case 'sermon': return b?.data.reference || 'texto base'
-    case 'announcements': return plural(b?.data.items?.length ?? 0, 'aviso', 'avisos')
+    case 'sermon': return b?.data.reference ?? ''
+    case 'announcements': return b?.data.items?.length ? plural(b.data.items.length, 'aviso', 'avisos') : 'nenhum aviso'
     default: return ''
   }
 }
@@ -104,12 +105,16 @@ function toggleExpand(key: string) {
   else s.add(key)
   expanded.value = s
 }
+// Só o que ainda falta; o que está pronto não ocupa espaço.
+const collectBlock = computed(() => blocks.value.find((b) => b.type === 'collect'))
 const todos = computed(() => [
-  { key: 'leituras', label: readings.value.length ? (readersMissing.value ? `${plural(readersMissing.value, 'leitura', 'leituras')} sem leitor` : 'Leituras com leitor') : 'Acrescentar as leituras', done: readings.value.length > 0 && readersMissing.value === 0 },
-  ...(musicBlock.value ? [{ key: musicBlock.value.key, label: songCount.value ? plural(songCount.value, 'música escolhida', 'músicas escolhidas') : 'Escolher as músicas', done: songCount.value > 0 }] : []),
-  ...(announcements.value ? [{ key: announcements.value.key, label: `${plural(announcements.value.data.items?.length ?? 0, 'aviso', 'avisos')} para ler`, done: true }] : []),
+  ...(collectBlock.value && !collectBlock.value.body ? [{ key: collectBlock.value.key, label: 'Buscar a coleta do dia' }] : []),
+  ...(!readings.value.length
+    ? [{ key: 'leituras', label: 'Buscar as leituras do dia' }]
+    : readersMissing.value ? [{ key: 'leituras', label: `Escolher quem lê (${plural(readersMissing.value, 'leitura', 'leituras')})` }] : []),
+  ...(musicBlock.value && !songCount.value ? [{ key: musicBlock.value.key, label: 'Escolher as músicas' }] : []),
 ])
-const pendingTodos = computed(() => todos.value.filter((t) => !t.done).length)
+const pendingTodos = computed(() => todos.value.length)
 const dayWord = computed(() => weekdayLong(props.view.service.startsAt, tz.value).replace('-feira', ''))
 
 // ------------------------------------------------------------ ritos
@@ -378,9 +383,16 @@ async function saveDraft() {
         class="h3"
         style="position:relative"
       >
-        {{ pendingTodos ? `Falta ${pendingTodos === 1 ? '1 coisa' : `${pendingTodos} coisas`} para ${dayWord}` : `Tudo pronto para ${dayWord}` }}
+        {{ pendingTodos ? (pendingTodos === 1 ? `Falta 1 coisa para ${dayWord}` : `Faltam ${pendingTodos} coisas para ${dayWord}`) : `Tudo pronto para ${dayWord}` }}
       </h2>
+      <p
+        v-if="!pendingTodos"
+        style="position:relative;margin-top:4px;opacity:.9"
+      >
+        {{ view.published && !view.draft?.hasUnpublishedChanges ? 'Roteiro publicado e em dia.' : 'Confira e publique para a equipe ver.' }}
+      </p>
       <div
+        v-else
         class="stack-sm"
         style="gap:6px;margin-top:12px;position:relative"
       >
@@ -391,17 +403,7 @@ async function saveDraft() {
           class="todo"
           @click="openKey = t.key"
         >
-          <span
-            v-if="t.done"
-            class="todo__done"
-          ><Icon
-            name="check"
-            :weight="2.6"
-          /></span>
-          <span
-            v-else
-            class="todo__open"
-          />
+          <span class="todo__open" />
           <span class="grow">{{ t.label }}</span>
           <Icon
             name="chevron-right"
@@ -432,16 +434,22 @@ async function saveDraft() {
             style="width:10px;height:10px"
             :style="{ background: ok(it) ? 'var(--ok)' : '#e0a100' }"
           />
-          <span class="grow"><span
+          <!-- Título e, abaixo, quem faz e o que falta: cabe no celular sem espremer. -->
+          <span
+            class="grow"
+            style="min-width:0"
+          ><span
             style="display:block;font-weight:800;font-size:16px"
           >{{ titleOf(it) }}</span><span
-            class="muted"
+            v-if="whoOf(it.block) || summary(it)"
             style="display:block;font-size:13.5px"
-          >{{ summary(it) }}</span></span>
-          <span
+          ><span
             v-if="whoOf(it.block)"
-            style="font-size:13.5px;font-weight:700;color:var(--accent-deep)"
-          >{{ whoOf(it.block) }}</span>
+            style="font-weight:700;color:var(--accent-deep)"
+          >{{ whoOf(it.block) }}</span><span
+            v-if="whoOf(it.block) && summary(it)"
+            class="muted"
+          > · </span><span class="muted">{{ summary(it) }}</span></span></span>
           <Icon
             :name="openKey === it.key ? 'chevron-up' : 'chevron-down'"
             :weight="2"

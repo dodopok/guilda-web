@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { liturgicalSnapshots, outboundMessages, slots } from '../../server/db/schema'
 import {
   applySuggestions, createScript, createSong, createTemplate, duplicateTemplate, exportHtml, exportText, fetchSuggestions,
-  getPublishedContent, getScript, lookupSongKey, notifyMusic, publishScript, rebuildFromTemplate, replaceBlocks, searchSongs, setMusic, updateScript, updateTemplate,
+  getPublishedContent, getScript, getTemplate, lookupSongKey, notifyMusic, publishScript, rebuildFromTemplate, replaceBlocks, searchSongs, setMusic, updateScript, updateTemplate,
 } from '../../server/services/liturgy'
 import { assignPerson, publishMonth, reassign } from '../../server/services/schedule'
 import { createDuty } from '../../server/services/catalog'
@@ -176,6 +176,31 @@ describe('roteiro de liturgia e Estêvão', () => {
     expect(outside2).toEqual(expect.arrayContaining([f.duties.abertura, f.duties.sermao]))
     expect(outside2).not.toContain(f.duties.louvor)
     await expect(rebuildFromTemplate(db(), f.ana.ctx, svc.id, novo.id)).rejects.toMatchObject({ status: 403 })
+  })
+
+  it('salvar o modelo pode atualizar os próximos roteiros ainda não publicados', async () => {
+    const { f, svc, t } = await setup(db())
+    const svc2 = await makeService(db(), f, '2026-11-15')
+    await createScript(db(), f.coord.ctx, svc2.id, t.id)
+    await publishScript(db(), f.coord.ctx, svc2.id)
+    // Quem lê já escolhido no roteiro não publicado continua depois da atualização.
+    const before = await getScript(db(), f.coord.ctx, svc.id)
+    const edited = before.draft!.blocks.map((b) => ({ type: b.type as 'reading', title: b.title, body: b.body, textSource: b.textSource as 'church', dutyId: b.dutyId, personId: b.type === 'reading' ? f.carla.id : b.personId, data: b.data }))
+    await replaceBlocks(db(), f.coord.ctx, svc.id, { blocks: edited })
+    expect((await getTemplate(db(), f.coord.ctx, t.id)).upcomingDrafts).toBe(1)
+
+    const tpl = await getTemplate(db(), f.coord.ctx, t.id)
+    const blocks = [{ type: 'heading' as const, title: 'Nome do domingo', textSource: 'estevao' as const }, ...tpl.blocks.map((b) => ({ type: b.type as 'rite', title: b.title, body: b.body, textSource: b.textSource as 'church', dutyId: b.dutyId }))]
+    const r = await updateTemplate(db(), f.coord.ctx, t.id, { blocks, applyToUpcoming: true })
+    expect(r.updatedScripts).toBe(1)
+    const after = await getScript(db(), f.coord.ctx, svc.id)
+    expect(after.draft!.blocks[0]!.type).toBe('heading')
+    expect(after.draft!.blocks.find((b) => b.type === 'reading')!.personId).toBe(f.carla.id)
+    expect(after.draft!.template!.changedSince).toBe(false)
+    // O publicado fica como estava e passa a avisar que o modelo mudou.
+    const published = await getScript(db(), f.coord.ctx, svc2.id)
+    expect(published.draft!.blocks[0]!.type).not.toBe('heading')
+    expect(published.draft!.template!.changedSince).toBe(true)
   })
 
   it('função nova aparece no roteiro por padrão só se for da liturgia', async () => {

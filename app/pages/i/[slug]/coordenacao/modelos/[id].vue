@@ -8,7 +8,7 @@ const { capi, link } = useChurch()
 const toast = useToast()
 
 interface RawBlock { id: string, type: string, title: string, body: string | null, textSource: string, dutyId: string | null }
-interface TemplateFull { id: string, name: string, kind: string, description: string | null, blocks: RawBlock[] }
+interface TemplateFull { id: string, name: string, kind: string, description: string | null, blocks: RawBlock[], upcomingDrafts: number }
 const { data, refresh } = await useAsyncData(`template-${id}`, async () => {
   const [t, c] = await Promise.all([capi<{ template: TemplateFull }>(`/templates/${id}`), capi<{ duties: Duty[] }>('/catalog')])
   return { template: t.template, duties: c.duties.filter((d) => d.active) }
@@ -77,12 +77,25 @@ onBeforeRouteLeave(() => (dirty.value ? window.confirm('Sair sem salvar o modelo
 
 const dutyName = (dutyId: string | null) => data.value?.duties.find((d) => d.id === dutyId)?.name
 const dutyOfKind = (k: string) => data.value?.duties.find((d) => d.kind === k)?.id ?? null
+// Uma linha curta que diz de onde vem o conteúdo e quem faz.
+const SLOT_SHORT: Record<string, string> = { first_reading: '1ª leitura', psalm: 'Salmo', second_reading: '2ª leitura', gospel: 'Evangelho' }
+const nameEq = (a: string, b: string) => a.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().trim() === b.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().trim()
+function rowTitle(it: Item) {
+  return it.kind === 'readings' || it.kind === 'sunday' ? BLOCK_KINDS[it.kind].label : it.title
+}
 function subOf(it: Item) {
-  const k = BLOCK_KINDS[it.kind]
-  const parts = [k.estevao ? 'Vem do Estêvão' : it.loc ? 'Texto do Livro de Oração' : 'Da igreja']
-  if (it.kind === 'readings') parts.push(READING_SLOTS.filter((s) => it.slots.includes(s.slot)).map((s) => s.title).join(', ') || 'nenhuma leitura marcada')
-  if (k.hasDuty && dutyName(it.dutyId)) parts.push(dutyName(it.dutyId)!)
-  return parts.join(' · ')
+  // Função com o mesmo nome do bloco (Sermão/Sermão) vira "quem está na escala".
+  const duty = BLOCK_KINDS[it.kind].hasDuty ? dutyName(it.dutyId) : undefined
+  const who = duty && nameEq(duty, it.title) ? 'quem está na escala' : duty
+  switch (it.kind) {
+    case 'heading': return 'Título'
+    case 'sunday': return 'Vem do Estêvão'
+    case 'collect': return ['Vem do Estêvão', who].filter(Boolean).join(' · ')
+    case 'readings': return READING_SLOTS.filter((s) => it.slots.includes(s.slot)).map((s) => SLOT_SHORT[s.slot] ?? s.title).join(', ') || 'Nenhuma leitura marcada'
+    case 'rite':
+    case 'text': return [it.loc ? 'Texto do LOC' : it.body.trim() ? 'Texto da igreja' : 'Sem texto', who].filter(Boolean).join(' · ')
+    default: return who ? who.charAt(0).toUpperCase() + who.slice(1) : BLOCK_KINDS[it.kind].label
+  }
 }
 function move(i: number, dir: -1 | 1) {
   const j = i + dir
@@ -165,7 +178,11 @@ function addDuty(d: Duty) {
 }
 
 const saving = ref(false)
-async function save() {
+// Mudou a ordem e há próximos roteiros deste modelo ainda não publicados: pergunta se
+// eles acompanham (o que já foi preenchido neles continua).
+const askApply = ref(false)
+const baselineBlocks = computed(() => JSON.stringify(data.value ? toBlocks(fromBlocks(data.value.template.blocks)) : []))
+function save() {
   if (form.name.trim().length < 2) {
     toast.error('Dê um nome ao modelo.')
     return
@@ -174,10 +191,16 @@ async function save() {
     toast.error('Em "Leituras do dia", marque ao menos uma leitura.')
     return
   }
+  const blocksChanged = JSON.stringify(toBlocks(items.value)) !== baselineBlocks.value
+  if (blocksChanged && (data.value?.template.upcomingDrafts ?? 0) > 0) askApply.value = true
+  else void doSave(false)
+}
+async function doSave(apply: boolean) {
+  askApply.value = false
   saving.value = true
   try {
-    await capi(`/templates/${id}`, { method: 'PATCH', body: { name: form.name, kind: form.kind, blocks: toBlocks(items.value) } })
-    toast.ok('Modelo salvo. Roteiros já criados não mudam.')
+    const r = await capi<{ updatedScripts: number }>(`/templates/${id}`, { method: 'PATCH', body: { name: form.name, kind: form.kind, blocks: toBlocks(items.value), applyToUpcoming: apply } })
+    toast.ok(apply && r.updatedScripts ? `Modelo salvo e ${plural(r.updatedScripts, 'roteiro atualizado', 'roteiros atualizados')}.` : 'Modelo salvo.')
     await refresh()
   } catch (e) {
     toast.error(e)
@@ -204,7 +227,7 @@ async function save() {
         maxlength="120"
       >
       <p class="lede">
-        A ordem do culto. Toque em um bloco para editar; setas mudam a ordem.
+        A ordem do culto. Toque em um bloco para editar, mover ou tirar.
       </p>
     </div>
 
@@ -241,77 +264,28 @@ async function save() {
       <li
         v-for="(it, i) in items"
         :key="it.key"
-        class="card card--flush"
+        class="card card--flush tplrow"
+        :style="{ borderLeftColor: BLOCK_KINDS[it.kind].fg === '#fff' ? BLOCK_KINDS[it.kind].bg : BLOCK_KINDS[it.kind].fg }"
       >
-        <div
-          class="row"
-          style="gap:10px;padding:10px 12px 10px 10px;flex-wrap:nowrap"
+        <button
+          type="button"
+          class="tplrow__main"
+          :aria-expanded="openKey === it.key"
+          @click="openKey = openKey === it.key ? null : it.key"
         >
           <span
-            class="stack-sm"
-            style="gap:3px"
-          >
-            <button
-              type="button"
-              class="arrowbtn"
-              :aria-label="`Subir ${it.title}`"
-              :disabled="i === 0"
-              @click="move(i, -1)"
-            ><Icon
-              name="chevron-up"
-              :weight="2.2"
-            /></button>
-            <button
-              type="button"
-              class="arrowbtn"
-              :aria-label="`Descer ${it.title}`"
-              :disabled="i === items.length - 1"
-              @click="move(i, 1)"
-            ><Icon
-              name="chevron-down"
-              :weight="2.2"
-            /></button>
+            class="tplrow__num"
+            aria-hidden="true"
+          >{{ i + 1 }}</span>
+          <span style="flex:1;min-width:0">
+            <span class="strong tplrow__title">{{ rowTitle(it) }}</span>
+            <span class="muted tplrow__sub">{{ subOf(it) }}</span>
           </span>
-          <button
-            type="button"
-            class="row"
-            style="flex:1;min-width:0;gap:10px;flex-wrap:nowrap;border:0;background:transparent;padding:4px 0;text-align:left;color:inherit"
-            :aria-expanded="openKey === it.key"
-            @click="openKey = openKey === it.key ? null : it.key"
-          >
-            <span
-              class="stag"
-              :style="{ background: BLOCK_KINDS[it.kind].bg, color: BLOCK_KINDS[it.kind].fg, flex: 'none' }"
-            >{{ BLOCK_KINDS[it.kind].label }}</span>
-            <span style="flex:1;min-width:0">
-              <span
-                v-if="it.kind !== 'readings' && it.kind !== 'sunday'"
-                class="strong"
-                style="display:block"
-              >{{ it.title }}</span>
-              <span
-                class="muted"
-                style="display:block;font-size:13px"
-              >{{ subOf(it) }}</span>
-            </span>
-            <Icon
-              :name="openKey === it.key ? 'chevron-up' : 'chevron-down'"
-              class="listrow__chev"
-            />
-          </button>
-          <button
-            type="button"
-            class="icon-btn icon-btn--round icon-btn--sm"
-            style="background:var(--surface-2);color:var(--muted)"
-            :aria-label="`Tirar ${it.title}`"
-            @click="remove(i)"
-          >
-            <Icon
-              name="x"
-              :weight="2.2"
-            />
-          </button>
-        </div>
+          <Icon
+            :name="openKey === it.key ? 'chevron-up' : 'chevron-down'"
+            class="listrow__chev"
+          />
+        </button>
 
         <div
           v-if="openKey === it.key"
@@ -418,6 +392,44 @@ async function save() {
             </select>
             <span class="field__hint">A pessoa escalada nessa função aparece no roteiro.</span>
           </label>
+
+          <div
+            class="row"
+            style="gap:8px;padding-top:4px"
+          >
+            <button
+              type="button"
+              class="btn btn--secondary btn--xs"
+              :disabled="i === 0"
+              @click="move(i, -1)"
+            >
+              <Icon
+                name="chevron-up"
+                :weight="2.2"
+                style="width:16px;height:16px"
+              />Subir
+            </button>
+            <button
+              type="button"
+              class="btn btn--secondary btn--xs"
+              :disabled="i === items.length - 1"
+              @click="move(i, 1)"
+            >
+              <Icon
+                name="chevron-down"
+                :weight="2.2"
+                style="width:16px;height:16px"
+              />Descer
+            </button>
+            <button
+              type="button"
+              class="linkbtn"
+              style="margin-left:auto;color:var(--danger, #b3261e)"
+              @click="remove(i)"
+            >
+              Tirar do modelo
+            </button>
+          </div>
         </div>
       </li>
     </ol>
@@ -533,6 +545,42 @@ async function save() {
             >{{ BLOCK_KINDS[k].sub }}</span>
           </button>
         </div>
+      </div>
+    </Sheet>
+
+    <Sheet
+      v-model:open="askApply"
+      title="Atualizar os próximos roteiros?"
+    >
+      <p class="soft">
+        {{ plural(data.template.upcomingDrafts, 'roteiro ainda não publicado usa', 'roteiros ainda não publicados usam') }} este modelo. Eles podem seguir a nova ordem agora — leituras, coleta, músicas, avisos e quem faz o quê continuam como estão.
+      </p>
+      <p
+        class="small muted"
+        style="margin-top:8px"
+      >
+        Roteiros já publicados não mudam; cada um mostra que o modelo mudou.
+      </p>
+      <div
+        class="stack-sm"
+        style="margin-top:16px"
+      >
+        <button
+          type="button"
+          class="btn btn--block"
+          :disabled="saving"
+          @click="doSave(true)"
+        >
+          Salvar e atualizar {{ plural(data.template.upcomingDrafts, 'roteiro', 'roteiros') }}
+        </button>
+        <button
+          type="button"
+          class="btn btn--secondary btn--block"
+          :disabled="saving"
+          @click="doSave(false)"
+        >
+          Salvar só o modelo
+        </button>
       </div>
     </Sheet>
   </div>
