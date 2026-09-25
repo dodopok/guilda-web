@@ -26,7 +26,7 @@ export async function getChannel(db: DbOrTx, churchId: string): Promise<Whatsapp
 
 export async function hasConsent(db: DbOrTx, churchId: string, personId: string): Promise<boolean> {
   const row = await db.query.consents.findFirst({
-    where: and(eq(consents.churchId, churchId), eq(consents.personId, personId), eq(consents.channel, 'whatsapp')),
+    where: and(eq(consents.churchId, churchId), eq(consents.personId, personId), eq(consents.channel, 'whatsapp'), eq(consents.purpose, 'service_messages')),
   })
   return row?.status === 'granted'
 }

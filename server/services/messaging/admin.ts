@@ -21,9 +21,14 @@ export async function getChannelConfig(db: Db, ctx: ChurchContext) {
   const c = channel!
   // Pessoas ativas com celular, e quantas autorizaram mensagens individuais.
   const [consentStats] = await db.select({
-    people: sql<number>`count(*)::int`,
-    granted: sql<number>`count(*) filter (where exists (select 1 from ${consents} k where k.church_id = ${people.churchId} and k.person_id = ${people.id} and k.status = 'granted'))::int`,
-  }).from(people).where(and(eq(people.churchId, ctx.church.id), eq(people.status, 'active'), sql`${people.phoneE164} is not null`))
+    people: sql<number>`count(distinct ${people.id})::int`,
+    granted: sql<number>`count(distinct ${people.id}) filter (where ${consents.status} = 'granted')::int`,
+  }).from(people).leftJoin(consents, and(
+    eq(consents.churchId, people.churchId),
+    eq(consents.personId, people.id),
+    eq(consents.channel, 'whatsapp'),
+    eq(consents.purpose, 'service_messages'),
+  )).where(and(eq(people.churchId, ctx.church.id), eq(people.status, 'active'), sql`${people.phoneE164} is not null`))
   return {
     mode: c.mode,
     lastWebhookAt: c.lastWebhookAt,
