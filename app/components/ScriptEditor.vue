@@ -370,6 +370,18 @@ const fullName = (id: string | null) => props.people.find((p) => p.id === id)?.d
 async function saveDraft() {
   if (await persist()) toast.ok('Rascunho salvo.')
 }
+async function printDraft() {
+  const printWindow = window.open('about:blank', '_blank')
+  if (!printWindow) {
+    toast.error('Permita abrir uma nova guia para imprimir o roteiro.')
+    return
+  }
+  if (dirty.value && !(await persist())) {
+    printWindow.close()
+    return
+  }
+  printWindow.location.href = `${exportBase.value}?format=html&draft=true`
+}
 </script>
 
 <template>
@@ -979,22 +991,18 @@ async function saveDraft() {
     </div>
 
     <div class="savebar script-editor-savebar">
-      <template v-if="view.published">
-        <a
-          :href="`${exportBase}?format=txt`"
-          class="link"
-        >Baixar texto</a>
-        <a
-          :href="`${exportBase}?format=html`"
-          target="_blank"
-          rel="noopener"
-          class="link"
-        >Imprimir</a>
-      </template>
       <button
         type="button"
-        class="btn btn--secondary"
-        style="min-height:52px;font-size:15px"
+        class="btn btn--secondary script-editor-savebar__print"
+        aria-label="Imprimir roteiro"
+        :disabled="busy"
+        @click="printDraft"
+      >
+        <Icon name="print" /><span>Imprimir</span>
+      </button>
+      <button
+        type="button"
+        class="btn btn--secondary script-editor-savebar__draft"
         :disabled="busy || !dirty"
         @click="saveDraft"
       >
@@ -1002,8 +1010,7 @@ async function saveDraft() {
       </button>
       <button
         type="button"
-        class="btn btn--float"
-        style="padding:12px 24px"
+        class="btn btn--float script-editor-savebar__primary"
         :disabled="busy"
         @click="save"
       >

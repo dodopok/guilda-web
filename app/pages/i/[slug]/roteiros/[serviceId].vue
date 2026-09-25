@@ -188,10 +188,6 @@ const exportBase = computed(() => `/api/v1/churches/${slug.value}/scripts/${serv
           rel="noopener"
           class="link"
         ><Icon name="print" />Imprimir</a>
-        <a
-          :href="`${exportBase}?format=txt`"
-          class="link"
-        ><Icon name="download" />Baixar em texto</a>
       </p>
 
       <div
