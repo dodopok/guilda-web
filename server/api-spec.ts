@@ -139,7 +139,7 @@ export const ROUTES: RouteDoc[] = [
   { method: 'post', path: `${C}/scripts/{serviceId}/blocks/{blockId}/notify`, summary: 'Avisar pelo WhatsApp quem lê, com a referência', auth: 'coordinator' },
   { method: 'post', path: `${C}/scripts/{serviceId}/publish`, summary: 'Publicar versão imutável', auth: 'coordinator' },
   { method: 'get', path: `${C}/scripts/{serviceId}/versions`, summary: 'Versões publicadas e origem dos dados litúrgicos', auth: 'session' },
-  { method: 'get', path: `${C}/scripts/{serviceId}/export`, summary: 'Exportar versão publicada', auth: 'session', query: { format: 'html | txt | json', version: 'Versão (padrão: última)' } },
+  { method: 'get', path: `${C}/scripts/{serviceId}/export`, summary: 'Exportar roteiro publicado ou rascunho para coordenação e pastores', auth: 'session', query: { format: 'html | txt | json', version: 'Versão publicada (padrão: última)', draft: 'true para exportar o rascunho atual (coordenação e pastores)' } },
   { method: 'get', path: `${C}/scripts/{serviceId}/liturgical-data`, summary: 'Consultar o Estêvão e guardar foto; em falha devolve erro e última foto', auth: 'coordinator' },
   { method: 'post', path: `${C}/scripts/{serviceId}/liturgical-data/apply`, summary: 'Aplicar coleta, leituras e calendário escolhidos', auth: 'coordinator', body: applySchema },
   { method: 'put', path: `${C}/scripts/{serviceId}/music`, summary: 'Escolher músicas (quem prega, pastores ou coordenação)', auth: 'session', body: musicSchema },

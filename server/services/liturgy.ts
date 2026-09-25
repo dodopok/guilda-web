@@ -990,6 +990,36 @@ export async function getPublishedContent(db: Db, ctx: ChurchContext, serviceId:
   return { version: row.version, publishedAt: row.createdAt, content: row.content }
 }
 
+export async function getDraftContent(db: Db, ctx: ChurchContext, serviceId: string) {
+  if (!isCoordinator(ctx) && !isPastor(ctx)) throw forbidden()
+  const view = await getScript(db, ctx, serviceId)
+  const draft = view.draft
+  if (!draft) throw notFound('Rascunho do roteiro')
+  const ownerIds = [...new Set(draft.blocks.flatMap((b) => (b.data.items ?? []).map((item) => item.ownerPersonId).filter((id): id is string => Boolean(id))))]
+  const owners = ownerIds.length
+    ? await db.select({ id: people.id, name: people.displayName }).from(people).where(and(eq(people.churchId, ctx.church.id), inArray(people.id, ownerIds)))
+    : []
+  const ownerNames = new Map(owners.map((owner) => [owner.id, owner.name]))
+  return {
+    version: 'Rascunho' as const,
+    content: {
+      title: draft.title,
+      service: view.service,
+      liturgy: draft.liturgy,
+      blocks: draft.blocks.map((b) => ({
+        type: b.type,
+        title: b.title,
+        body: b.body,
+        reference: b.data.reference ?? null,
+        ...(b.type === 'reading' || b.type === 'psalm' ? { responses: resolveResponses(b.data.slot, b.data.reference, b.data.responses) } : {}),
+        responsibles: b.responsibles.map((r) => ({ name: r.name, status: r.status })),
+        songs: b.songs.filter((song): song is NonNullable<typeof song> => Boolean(song)).map((song) => ({ title: song.title, author: song.author, musicalKey: keyFor(b.data, song) })),
+        items: (b.data.items ?? []).map((item) => ({ text: item.text, owner: item.ownerPersonId ? ownerNames.get(item.ownerPersonId) ?? null : null })),
+      })),
+    },
+  }
+}
+
 const STATUS_TEXT: Record<string, string> = { pending: 'a confirmar', confirmed: 'confirmado', declined: 'recusou', not_scheduled: 'fora da escala' }
 
 interface ExportBlock {
@@ -1003,7 +1033,7 @@ interface ExportBlock {
   items: { text: string, owner: string | null }[]
 }
 
-export function exportText(content: Record<string, unknown>, timeZone: string, version: number): string {
+export function exportText(content: Record<string, unknown>, timeZone: string, version: number | 'Rascunho'): string {
   const service = content.service as { title: string, startsAt: string, location: string | null }
   const liturgy = (content.liturgy ?? {}) as { color?: string | null, celebration?: string | null, sundayName?: string | null }
   const lines: string[] = []
@@ -1011,7 +1041,7 @@ export function exportText(content: Record<string, unknown>, timeZone: string, v
   lines.push(formatServiceDate(new Date(service.startsAt), timeZone) + (service.location ? ` — ${service.location}` : ''))
   const lit = [liturgy.sundayName, liturgy.celebration, liturgy.color && `cor: ${liturgy.color}`].filter(Boolean).join(' · ')
   if (lit) lines.push(lit)
-  lines.push(`Versão ${version}`)
+  lines.push(typeof version === 'number' ? `Versão ${version}` : version)
   lines.push('')
   for (const b of (content.blocks ?? []) as ExportBlock[]) {
     const who = b.responsibles.length ? ` — ${b.responsibles.map((r) => `${r.name}${r.status !== 'confirmed' ? ` (${STATUS_TEXT[r.status] ?? r.status})` : ''}`).join(', ')}` : ''
@@ -1041,7 +1071,7 @@ function richHtml(src: string) {
   }).join('')
 }
 
-export function exportHtml(content: Record<string, unknown>, timeZone: string, version: number): string {
+export function exportHtml(content: Record<string, unknown>, timeZone: string, version: number | 'Rascunho'): string {
   const service = content.service as { title: string, startsAt: string, location: string | null }
   const liturgy = (content.liturgy ?? {}) as { color?: string | null, celebration?: string | null, sundayName?: string | null }
   const blocks = (content.blocks ?? []) as ExportBlock[]
@@ -1068,7 +1098,7 @@ h1{font-size:1.6rem;margin:0}h2{font-size:1.05rem;text-transform:uppercase;lette
 <h1>${escapeHtml(String(content.title ?? service.title))}</h1>
 <p class="meta">${escapeHtml(formatServiceDate(new Date(service.startsAt), timeZone))}${service.location ? ` — ${escapeHtml(service.location)}` : ''}</p>
 ${lit ? `<p class="meta">${lit}</p>` : ''}
-<p class="meta">Versão ${version}</p>
+<p class="meta">${typeof version === 'number' ? `Versão ${version}` : version}</p>
 ${body}
 </body></html>
 `
