@@ -22,15 +22,10 @@ const phoneField = z.string().trim().max(30).nullable().optional().transform((v,
 export const personInputSchema = z.object({
   displayName: z.string().trim().min(2).max(120),
   phone: phoneField,
-  whatsappConsent: z.boolean().default(false),
   roles: z.array(z.enum(ROLES as [string, ...string[]])).min(1).default(['participant']),
   restExempt: z.boolean().default(false),
   notes: z.string().trim().max(1000).nullable().optional(),
   dutyIds: z.array(z.string().uuid()).default([]),
-}).superRefine((input, ctx) => {
-  if (input.whatsappConsent && !input.phone) {
-    ctx.addIssue({ code: 'custom', path: ['whatsappConsent'], message: 'Cadastre o celular antes de registrar a autorização.' })
-  }
 })
 
 export const personUpdateSchema = z.object({
@@ -69,29 +64,6 @@ export async function createPerson(db: Db, ctx: ChurchContext, raw: z.input<type
     }).returning()
     if (input.dutyIds.length) {
       await tx.insert(qualifications).values(input.dutyIds.map((dutyId) => ({ churchId: ctx.church.id, personId: person!.id, dutyId })))
-    }
-    if (input.whatsappConsent) {
-      const now = new Date()
-      await tx.insert(consents).values({
-        churchId: ctx.church.id,
-        personId: person!.id,
-        channel: 'whatsapp',
-        purpose: 'service_messages',
-        status: 'granted',
-        grantedAt: now,
-        source: 'outro',
-        evidenceNote: 'Autorização confirmada pela coordenação durante o cadastro da pessoa.',
-        recordedByAccountId: ctx.accountId,
-        updatedAt: now,
-      })
-      await audit(tx, {
-        churchId: ctx.church.id,
-        actorAccountId: ctx.accountId,
-        action: 'consent.granted',
-        entityType: 'person',
-        entityId: person!.id,
-        data: { source: 'outro', phoneLast4: person!.phoneE164?.slice(-4) ?? null, duringRegistration: true },
-      })
     }
     await audit(tx, { churchId: ctx.church.id, actorAccountId: ctx.accountId, action: 'person.created', entityType: 'person', entityId: person!.id })
     return person!
@@ -251,7 +223,11 @@ export async function listPeople(db: Db, ctx: ChurchContext) {
       dutyIds: dutyMap.get(p.id) ?? [],
     }))
   }
-  const consentRows = await db.select().from(consents).where(eq(consents.churchId, ctx.church.id))
+  const consentRows = await db.select().from(consents).where(and(
+    eq(consents.churchId, ctx.church.id),
+    eq(consents.channel, 'whatsapp'),
+    eq(consents.purpose, 'service_messages'),
+  ))
   const consentMap = new Map(consentRows.map((c) => [c.personId, c]))
   const lastInvite = await db.execute<{ person_id: string, created_at: Date, used_at: Date | null, expires_at: Date, revoked_at: Date | null }>(sql`
     select distinct on (person_id) person_id, created_at, used_at, expires_at, revoked_at

@@ -89,7 +89,11 @@ async function setConsent(on: boolean) {
   try {
     await capi(`/people/${p.id}/consent`, { method: 'PUT', body: { status: on ? 'granted' : 'revoked', source: 'presencial' } })
     toast.ok(on ? 'Autorização registrada.' : 'Autorização retirada: nenhuma mensagem sai para esta pessoa.')
-    await refresh()
+    const churchSlug = String(route.params.slug)
+    await Promise.all([
+      refresh(),
+      refreshNuxtData([`wa-${churchSlug}`, `tool-counts-${churchSlug}`]),
+    ])
   } catch (e) {
     toast.error(e)
   }
@@ -196,17 +200,17 @@ async function setActive(active: boolean) {
 
 // Nova pessoa
 const newOpen = ref(false)
-const np = reactive({ name: '', phone: '', roles: ['participant'] as string[], whatsappConsent: false })
+const np = reactive({ name: '', phone: '', roles: ['participant'] as string[] })
 async function saveNew() {
   if (np.name.trim().length < 2) {
     toast.error('Escreva o nome.')
     return
   }
   try {
-    const r = await capi<{ person: { id: string } }>('/people', { method: 'POST', body: { displayName: np.name.trim(), phone: np.phone.trim() || null, roles: np.roles, whatsappConsent: np.whatsappConsent } })
-    toast.ok(np.whatsappConsent ? `${np.name.trim().split(' ')[0]} entrou na lista; autorização registrada.` : `${np.name.trim().split(' ')[0]} entrou na lista. Agora marque as funções.`)
+    const r = await capi<{ person: { id: string } }>('/people', { method: 'POST', body: { displayName: np.name.trim(), phone: np.phone.trim() || null, roles: np.roles } })
+    toast.ok(`${np.name.trim().split(' ')[0]} entrou na lista. Agora marque as funções.`)
     newOpen.value = false
-    Object.assign(np, { name: '', phone: '', roles: ['participant'], whatsappConsent: false })
+    Object.assign(np, { name: '', phone: '', roles: ['participant'] })
     await refresh()
     openPerson(r.person.id)
   } catch (e) {
@@ -818,7 +822,7 @@ watch(personId, () => (dataOpen.value = false))
     <Sheet
       v-model:open="newOpen"
       title="Nova pessoa"
-      lede="Nome e celular bastam. Registre a autorização só se a pessoa já tiver concordado."
+      lede="Nome e celular bastam. Depois você marca as funções e envia o convite."
     >
       <form
         class="stack-md"
@@ -832,13 +836,6 @@ watch(personId, () => (dataOpen.value = false))
         <label class="field"><span class="field__label">Celular (WhatsApp)</span><PhoneInput
           v-model="np.phone"
         /></label>
-        <SwitchRow
-          v-model="np.whatsappConsent"
-          title="Autorizou receber mensagens pelo WhatsApp"
-          sub="Quem não autorizou continua sem receber mensagens."
-          boxed
-          :disabled="!np.phone.trim()"
-        />
         <div>
           <span class="field__label">Papel na igreja</span>
           <RolePicker v-model="np.roles" />
